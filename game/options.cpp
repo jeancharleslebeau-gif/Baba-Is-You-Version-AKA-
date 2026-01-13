@@ -1,0 +1,260 @@
+/*
+===============================================================================
+  options.cpp — Menu OPTIONS du moteur Baba
+-------------------------------------------------------------------------------
+  Rôle :
+    - Afficher et gérer le menu OPTIONS.
+    - Sous-menus :
+        * Audio : volumes, tests, choix musique
+        * Niveau : sélection du niveau
+    - Sauvegarder/charger les options via NVS (à implémenter)
+===============================================================================
+*/
+
+#include <cstdio>           // sprintf
+#include "options.h"
+#include "core/graphics.h"
+#include "core/input.h"
+#include "core/audio.h"
+#include "music_map.h"
+#include "game/game.h"
+
+namespace baba {
+
+// -----------------------------------------------------------------------------
+//  États internes du menu
+// -----------------------------------------------------------------------------
+enum class OptionsPage {
+    ROOT,
+    AUDIO,
+    AUDIO_TEST,
+    AUDIO_MUSIC,
+    LEVEL_SELECT
+};
+
+static OptionsPage page = OptionsPage::ROOT;
+static int cursor = 0;
+static int selectedLevel = 0;
+static MusicID forcedMusic = MusicID::NONE;
+
+// -----------------------------------------------------------------------------
+//  Sauvegarde / chargement (NVS)
+// -----------------------------------------------------------------------------
+void options_init() {
+    // TODO : charger depuis NVS
+}
+
+void options_save() {
+    // TODO : sauvegarder dans NVS
+}
+
+// -----------------------------------------------------------------------------
+//  Affichage d’un item centré
+// -----------------------------------------------------------------------------
+static void draw_item(int y, const char* text, bool selected) {
+    gfx_text_center(y, text, selected ? COLOR_YELLOW : COLOR_WHITE);
+}
+
+// -----------------------------------------------------------------------------
+//  Page : menu principal OPTIONS
+// -----------------------------------------------------------------------------
+static void page_root(const Keys& k) {
+    const char* items[] = {
+        "Audio",
+        "Choisir niveau",
+        "Retour"
+    };
+    const int count = 3;
+
+    if (k.up)    cursor = (cursor + count - 1) % count;
+    if (k.down)  cursor = (cursor + 1) % count;
+
+    if (k.A) {
+        if (cursor == 0) { page = OptionsPage::AUDIO;        cursor = 0; }
+        if (cursor == 1) { page = OptionsPage::LEVEL_SELECT; cursor = 0; }
+        if (cursor == 2) { game_mode() = GameMode::Playing; }
+    }
+
+    gfx_clear(COLOR_BLACK);
+    gfx_text_center(40, "OPTIONS", COLOR_WHITE);
+
+    for (int i = 0; i < count; i++)
+        draw_item(100 + i * 20, items[i], cursor == i);
+
+    gfx_flush();
+}
+
+// -----------------------------------------------------------------------------
+//  Page : Audio
+// -----------------------------------------------------------------------------
+static void page_audio(const Keys& k) {
+    const char* items[] = {
+        "Volume musique",
+        "Volume SFX",
+        "Tester sons",
+        "Choisir musique",
+        "Retour"
+    };
+    const int count = 5;
+
+    if (k.up)    cursor = (cursor + count - 1) % count;
+    if (k.down)  cursor = (cursor + 1) % count;
+
+    // Réglage des volumes (0–100)
+    if (cursor <= 1) {
+        int* volumes[] = {
+            &g_audio_settings.music_volume,
+            &g_audio_settings.sfx_volume
+        };
+
+        if (k.left && *volumes[cursor] > 0)
+            (*volumes[cursor])--;
+
+        if (k.right && *volumes[cursor] < 100)
+            (*volumes[cursor])++;
+
+        // Applique au backend
+        if (cursor == 0)
+            audio_set_music_volume(*volumes[0]);
+        if (cursor == 1)
+            audio_set_sfx_volume(*volumes[1]);
+    }
+
+    if (k.A) {
+        if (cursor == 2) page = OptionsPage::AUDIO_TEST;
+        if (cursor == 3) page = OptionsPage::AUDIO_MUSIC;
+        if (cursor == 4) page = OptionsPage::ROOT;
+    }
+
+    gfx_clear(COLOR_BLACK);
+    gfx_text_center(40, "AUDIO", COLOR_WHITE);
+
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "Musique: %d", g_audio_settings.music_volume);
+    draw_item(100, buf, cursor == 0);
+
+    std::snprintf(buf, sizeof(buf), "SFX: %d", g_audio_settings.sfx_volume);
+    draw_item(120, buf, cursor == 1);
+
+    draw_item(160, "Tester sons",     cursor == 2);
+    draw_item(180, "Choisir musique", cursor == 3);
+    draw_item(200, "Retour",          cursor == 4);
+
+    gfx_flush();
+}
+
+// -----------------------------------------------------------------------------
+//  Page : test des sons
+// -----------------------------------------------------------------------------
+static void page_audio_test(const Keys& k) {
+    const char* items[] = {
+        "Move",
+        "Push",
+        "Win",
+        "Lose",
+        "Retour"
+    };
+    const int count = 5;
+
+    if (k.up)    cursor = (cursor + count - 1) % count;
+    if (k.down)  cursor = (cursor + 1) % count;
+
+    if (k.A) {
+        if (cursor == 0) audio_play_move();
+        if (cursor == 1) audio_play_push();
+        if (cursor == 2) audio_play_win();
+        if (cursor == 3) audio_play_lose();
+        if (cursor == 4) page = OptionsPage::AUDIO;
+    }
+
+    gfx_clear(COLOR_BLACK);
+    gfx_text_center(40, "TEST SONS", COLOR_WHITE);
+
+    for (int i = 0; i < count; i++)
+        draw_item(100 + i * 20, items[i], cursor == i);
+
+    gfx_flush();
+}
+
+// -----------------------------------------------------------------------------
+//  Page : choix de la musique
+// -----------------------------------------------------------------------------
+static void page_audio_music(const Keys& k) {
+    const int musicCount = 7;
+
+    if (k.up)    cursor = (cursor + musicCount - 1) % musicCount;
+    if (k.down)  cursor = (cursor + 1) % musicCount;
+
+    if (k.A) {
+        forcedMusic = static_cast<MusicID>(cursor);
+        audio_play_music_id(forcedMusic);
+    }
+
+    if (k.B) {
+        forcedMusic = MusicID::NONE;
+        page = OptionsPage::AUDIO;
+    }
+
+    gfx_clear(COLOR_BLACK);
+    gfx_text_center(40, "CHOIX MUSIQUE", COLOR_WHITE);
+
+    const char* names[] = {
+        "Baba Samba",
+        "Baba Music 2",
+        "Baba Cave",
+        "Crystal",
+        "Misthart",
+        "WF Drago",
+        "WF Mages"
+    };
+
+    for (int i = 0; i < musicCount; i++)
+        draw_item(100 + i * 20, names[i], cursor == i);
+
+    gfx_flush();
+}
+
+// -----------------------------------------------------------------------------
+//  Page : sélection du niveau
+// -----------------------------------------------------------------------------
+static void page_level_select(const Keys& k) {
+    const int maxLevel = 20;
+
+    if (k.left)  selectedLevel = (selectedLevel + maxLevel) % (maxLevel + 1);
+    if (k.right) selectedLevel = (selectedLevel + 1) % (maxLevel + 1);
+
+    if (k.A) {
+        game_load_level(selectedLevel);
+        game_mode() = GameMode::Playing;
+    }
+
+    if (k.B) page = OptionsPage::ROOT;
+
+    gfx_clear(COLOR_BLACK);
+    gfx_text_center(40, "SELECTION NIVEAU", COLOR_WHITE);
+
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "Niveau : %d", selectedLevel);
+    gfx_text_center(120, buf, COLOR_YELLOW);
+
+    gfx_text_center(200, "A = Jouer   B = Retour", COLOR_WHITE);
+
+    gfx_flush();
+}
+
+// -----------------------------------------------------------------------------
+//  Fonction principale appelée depuis task_game
+// -----------------------------------------------------------------------------
+void options_update() {
+    Keys k = g_keys;
+
+    switch (page) {
+        case OptionsPage::ROOT:         page_root(k); break;
+        case OptionsPage::AUDIO:        page_audio(k); break;
+        case OptionsPage::AUDIO_TEST:   page_audio_test(k); break;
+        case OptionsPage::AUDIO_MUSIC:  page_audio_music(k); break;
+        case OptionsPage::LEVEL_SELECT: page_level_select(k); break;
+    }
+}
+
+} // namespace baba
