@@ -61,6 +61,7 @@
 // -----------------------------------------------------------------------------
 #include "tasks/task_game.h"
 #include "tasks/task_input.h"
+#include "tasks/task_audio.h"
 
 static gb_core g_core;
 
@@ -123,7 +124,7 @@ extern "C" void app_main(void)
 {
     printf("\n=============================================\n");
     printf("  BabaIsU — Moteur Puzzle AKA Edition\n");
-    printf("  (c) Jean‑Charles — Architecture modulaire\n");
+    printf("  (c) Jean-Charles — Architecture modulaire\n");
     printf("=============================================\n\n");
 
     hardware_init();
@@ -132,38 +133,45 @@ extern "C" void app_main(void)
     //  Création des tâches FreeRTOS
     // -------------------------------------------------------------------------
 
+    // Tâche audio (cadence stable, init + pool)
+    xTaskCreatePinnedToCore(
+        task_audio,
+        "AudioTask",
+        4096,
+        nullptr,
+        4,
+        nullptr,
+        1 // Core 0 : idéal pour l’audio (I2S + DMA)
+    );
+
+    // Tâche input (lecture boutons)
+    xTaskCreatePinnedToCore(
+        baba::task_input,
+        "InputTask",
+        4096,
+        nullptr,
+        3,
+        nullptr,
+        0 // Core 0
+    );
+
     // Tâche principale du jeu (40 FPS)
     xTaskCreatePinnedToCore(
         baba::task_game,
         "GameTask",
         8192,
         nullptr,
-        5,
+        6,
         nullptr,
-        1 // Core 1 : dédié au gameplay + rendu
+        1 // Core 1 : gameplay + rendu
     );
-
-    // Tâche input (lecture boutons à cadence stable)
-    xTaskCreatePinnedToCore(
-        baba::task_input,
-        "InputTask",
-        4096,
-        nullptr,
-        4,
-        nullptr,
-        0 // Core 0
-    );
-
-    // NOTE :
-    // La tâche audio n’est PAS créée ici.
-    // Elle est gérée par audio_init() si nécessaire (I2S + callback).
 
     printf("[BabaIsU] Tâches lancées. Entrée en idle loop.\n");
 
     // -------------------------------------------------------------------------
     //  Boucle idle
-    //  (Laisse tourner les tâches FreeRTOS, évite le watchdog)
     // -------------------------------------------------------------------------
     while (true)
         vTaskDelay(pdMS_TO_TICKS(1000));
 }
+

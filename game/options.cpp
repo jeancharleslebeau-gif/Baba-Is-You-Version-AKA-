@@ -18,6 +18,7 @@
 #include "core/audio.h"
 #include "music_map.h"
 #include "game/game.h"
+#include "esp_timer.h"
 
 namespace baba {
 
@@ -36,6 +37,20 @@ static OptionsPage page = OptionsPage::ROOT;
 static int cursor = 0;
 static int selectedLevel = 0;
 static MusicID forcedMusic = MusicID::NONE;
+
+// -----------------------------------------------------------------------------
+//  Anti-repeat pour les touches (évite de défiler trop vite)
+// -----------------------------------------------------------------------------
+static uint32_t lastInputTime = 0;
+static const uint32_t INPUT_COOLDOWN_MS = 120;
+
+static bool input_ready() {
+    uint32_t now = esp_timer_get_time() / 1000; // en millisecondes
+    if (now - lastInputTime < INPUT_COOLDOWN_MS)
+        return false;
+    lastInputTime = now;
+    return true;
+}
 
 // -----------------------------------------------------------------------------
 //  Sauvegarde / chargement (NVS)
@@ -66,10 +81,10 @@ static void page_root(const Keys& k) {
     };
     const int count = 3;
 
-    if (k.up)    cursor = (cursor + count - 1) % count;
-    if (k.down)  cursor = (cursor + 1) % count;
+    if (k.up    && input_ready()) cursor = (cursor + count - 1) % count;
+    if (k.down  && input_ready()) cursor = (cursor + 1) % count;
 
-    if (k.A) {
+    if (k.A && input_ready()) {
         if (cursor == 0) { page = OptionsPage::AUDIO;        cursor = 0; }
         if (cursor == 1) { page = OptionsPage::LEVEL_SELECT; cursor = 0; }
         if (cursor == 2) { game_mode() = GameMode::Playing; }
@@ -97,8 +112,8 @@ static void page_audio(const Keys& k) {
     };
     const int count = 5;
 
-    if (k.up)    cursor = (cursor + count - 1) % count;
-    if (k.down)  cursor = (cursor + 1) % count;
+    if (k.up    && input_ready()) cursor = (cursor + count - 1) % count;
+    if (k.down  && input_ready()) cursor = (cursor + 1) % count;
 
     // Réglage des volumes (0–100)
     if (cursor <= 1) {
@@ -107,10 +122,10 @@ static void page_audio(const Keys& k) {
             &g_audio_settings.sfx_volume
         };
 
-        if (k.left && *volumes[cursor] > 0)
+        if (k.left  && input_ready() && *volumes[cursor] > 0)
             (*volumes[cursor])--;
 
-        if (k.right && *volumes[cursor] < 100)
+        if (k.right && input_ready() && *volumes[cursor] < 100)
             (*volumes[cursor])++;
 
         // Applique au backend
@@ -120,7 +135,7 @@ static void page_audio(const Keys& k) {
             audio_set_sfx_volume(*volumes[1]);
     }
 
-    if (k.A) {
+    if (k.A && input_ready()) {
         if (cursor == 2) page = OptionsPage::AUDIO_TEST;
         if (cursor == 3) page = OptionsPage::AUDIO_MUSIC;
         if (cursor == 4) page = OptionsPage::ROOT;
@@ -156,10 +171,10 @@ static void page_audio_test(const Keys& k) {
     };
     const int count = 5;
 
-    if (k.up)    cursor = (cursor + count - 1) % count;
-    if (k.down)  cursor = (cursor + 1) % count;
+    if (k.up    && input_ready()) cursor = (cursor + count - 1) % count;
+    if (k.down  && input_ready()) cursor = (cursor + 1) % count;
 
-    if (k.A) {
+    if (k.A && input_ready()) {
         if (cursor == 0) audio_play_move();
         if (cursor == 1) audio_play_push();
         if (cursor == 2) audio_play_win();
@@ -182,15 +197,15 @@ static void page_audio_test(const Keys& k) {
 static void page_audio_music(const Keys& k) {
     const int musicCount = 7;
 
-    if (k.up)    cursor = (cursor + musicCount - 1) % musicCount;
-    if (k.down)  cursor = (cursor + 1) % musicCount;
+    if (k.up    && input_ready()) cursor = (cursor + musicCount - 1) % musicCount;
+    if (k.down  && input_ready()) cursor = (cursor + 1) % musicCount;
 
-    if (k.A) {
+    if (k.A && input_ready()) {
         forcedMusic = static_cast<MusicID>(cursor);
-        audio_play_music_id(forcedMusic);
+        audio_request_music(forcedMusic);   // ✔ thread-safe
     }
 
-    if (k.B) {
+    if (k.B && input_ready()) {
         forcedMusic = MusicID::NONE;
         page = OptionsPage::AUDIO;
     }
@@ -220,15 +235,15 @@ static void page_audio_music(const Keys& k) {
 static void page_level_select(const Keys& k) {
     const int maxLevel = 20;
 
-    if (k.left)  selectedLevel = (selectedLevel + maxLevel) % (maxLevel + 1);
-    if (k.right) selectedLevel = (selectedLevel + 1) % (maxLevel + 1);
+    if (k.left  && input_ready()) selectedLevel = (selectedLevel + maxLevel) % (maxLevel + 1);
+    if (k.right && input_ready()) selectedLevel = (selectedLevel + 1) % (maxLevel + 1);
 
-    if (k.A) {
+    if (k.A && input_ready()) {
         game_load_level(selectedLevel);
         game_mode() = GameMode::Playing;
     }
 
-    if (k.B) page = OptionsPage::ROOT;
+    if (k.B && input_ready()) page = OptionsPage::ROOT;
 
     gfx_clear(COLOR_BLACK);
     gfx_text_center(40, "SELECTION NIVEAU", COLOR_WHITE);

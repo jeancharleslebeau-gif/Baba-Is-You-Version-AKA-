@@ -23,7 +23,7 @@ namespace baba {
 
 void task_input(void* param)
 {
-    const TickType_t period = pdMS_TO_TICKS(10); // 100 Hz
+    const TickType_t period = pdMS_TO_TICKS(16); // 60 Hz
     TickType_t last_wake = xTaskGetTickCount();
 	printf("[InputTask] started\n");
 

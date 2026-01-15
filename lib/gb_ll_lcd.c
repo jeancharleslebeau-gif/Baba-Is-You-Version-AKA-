@@ -483,37 +483,57 @@ uint32_t gb_ll_lcd_get_draw_count()
 
 void lcd_refresh()
 {
-    while( u32_refresh_ctr == 0 );  // wait last update compleped ( DMA )
-    u32_refresh_ctr = 0;            // reset complete dma flag
-    #ifdef USE_VSYCNC
-      // Sync to Scanline
-    uint64_t start_us = gb_get_micros();
-    while ( digitalRead( LCD_FMARK ) )
+    // ------------------------------------------------------------
+    // 1) Attendre la fin du DMA précédent (non bloquant)
+    // ------------------------------------------------------------
+    uint64_t start = gb_get_micros();
+    while (u32_refresh_ctr == 0)
     {
-        if ( ( gb_get_micros() - start_us ) > 20000 )
-        {
-            printf( "ERROR : Loop scanline 1 timeout\n" );
+        if (gb_get_micros() - start > 20000) {
+            printf("ERROR: DMA previous frame timeout\n");
             break;
         }
+        vTaskDelay(1); // yield indispensable
     }
-//    printf( "Loop scanline 1 %lld us\n", esp_timer_get_time() - start_us );
 
-    start_us = gb_get_micros();
-    while ( digitalRead( LCD_FMARK ) == 0 )
+    u32_refresh_ctr = 0; // reset flag
+
+
+#ifdef USE_VSYCNC
+    // ------------------------------------------------------------
+    // 2) Attendre FMARK = 1 (début VBlank)
+    // ------------------------------------------------------------
+    start = gb_get_micros();
+    while (digitalRead(LCD_FMARK))
     {
-        if ( ( gb_get_micros() - start_us ) > 20000 )
-        {
-            printf( "ERROR : Loop scanline 0 timeout\n" );
+        if (gb_get_micros() - start > 20000) {
+            printf("ERROR: Loop scanline 1 timeout\n");
             break;
         }
+        vTaskDelay(1);
     }
-//    printf( "Loop scanline 0 %lld us\n", esp_timer_get_time() - start_us );
-    #endif
 
+    // ------------------------------------------------------------
+    // 3) Attendre FMARK = 0 (fin VBlank)
+    // ------------------------------------------------------------
+    start = gb_get_micros();
+    while (digitalRead(LCD_FMARK) == 0)
+    {
+        if (gb_get_micros() - start > 20000) {
+            printf("ERROR: Loop scanline 0 timeout\n");
+            break;
+        }
+        vTaskDelay(1);
+    }
+#endif
 
+    // ------------------------------------------------------------
+    // 4) Lancer le DMA
+    // ------------------------------------------------------------
     u32_draw_count++;
-    LCD_FAST_test(framebuffer);     // start DMA update
+    LCD_FAST_test(framebuffer);
 }
+
 
 
 void lcd_scrool_vertical( int16_t scrool_pixels )

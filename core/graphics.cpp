@@ -20,8 +20,8 @@ static gb_graphics g_gfx;
 // ============================================================================
 void gfx_init()
 {
-    // Le LCD et le bus sont déjà initialisés par gb_core.init()
-    // On règle simplement la luminosité de base.
+    // Le LCD et le bus sont déjà initialisés par gb_core::init().
+    // Ici on ne fait que régler la luminosité de base.
     g_gfx.set_backlight_percent(80);
 }
 
@@ -196,52 +196,77 @@ void gfx_fillCircle(int cx, int cy, int r, Color color)
 
 // ============================================================================
 //  Blit d’un bitmap arbitraire (pixels 16 bits RGB565)
+//  - utilisé pour les images “pleines” (titre, écrans fixes, etc.)
 // ============================================================================
 void gfx_blit(const uint16_t* pixels, int w, int h, int x, int y)
 {
     for (int iy = 0; iy < h; ++iy)
     {
+        const uint16_t* srcLine = pixels + iy * w;
+        int dy = y + iy;
+
         for (int ix = 0; ix < w; ++ix)
         {
-            lcd_putpixel(x + ix, y + iy, pixels[iy * w + ix]);
+            int dx = x + ix;
+            lcd_putpixel(dx, dy, srcLine[ix]);
         }
     }
 }
 
 
 // ============================================================================
-//  Atlas de tiles (ex: sprites BabaIsU)
+//  Blit d’une région rectangulaire dans un atlas 16 bits (RGB565)
+//  - atlas = image brute (ex: 256×32) rangée ligne par ligne
+//  - srcX, srcY, srcW, srcH = rectangle source dans l’atlas
+//  - dstX, dstY = position de destination à l’écran
+//  - implémentation “DMA-friendly” : une ligne source = bloc contigu
 // ============================================================================
-void gfx_drawAtlas(
+void gfx_blitRegion(
     const uint16_t* atlas,
-    int atlasW, int atlasH,
+    int atlasW,
     int srcX, int srcY,
     int srcW, int srcH,
     int dstX, int dstY
 )
 {
-    const int TILE = 16; // taille d’un tile en pixels
-
-    for (int ty = 0; ty < srcH; ++ty)
+    for (int y = 0; y < srcH; ++y)
     {
-        for (int tx = 0; tx < srcW; ++tx)
+        // Pointeur sur le début de la ligne source dans l’atlas
+        const uint16_t* srcLine = atlas + (srcY + y) * atlasW + srcX;
+        int dy = dstY + y;
+
+        // Version CPU simple : pixel par pixel
+        // (remplaçable facilement par un appel DMA ligne par ligne)
+        for (int x = 0; x < srcW; ++x)
         {
-            int tileIndex = (srcY + ty) * atlasW + (srcX + tx);
-            const uint16_t* tilePixels = atlas + tileIndex * (TILE * TILE);
-
-            int px = dstX + tx * TILE;
-            int py = dstY + ty * TILE;
-
-            for (int y = 0; y < TILE; ++y)
-            {
-                for (int x = 0; x < TILE; ++x)
-                {
-                    lcd_putpixel(px + x, py + y, tilePixels[y * TILE + x]);
-                }
-            }
+            int dx = dstX + x;
+            lcd_putpixel(dx, dy, srcLine[x]);
         }
     }
 }
+
+/*
+    Variante DMA (à brancher plus tard) :
+
+    void gfx_blitRegion(
+        const uint16_t* atlas,
+        int atlasW,
+        int srcX, int srcY,
+        int srcW, int srcH,
+        int dstX, int dstY
+    )
+    {
+        lcd_startWriteWindow(dstX, dstY, srcW, srcH);
+
+        for (int y = 0; y < srcH; ++y)
+        {
+            const uint16_t* srcLine = atlas + (srcY + y) * atlasW + srcX;
+            lcd_writePixels(srcLine, srcW); // transfert DMA idéal
+        }
+
+        lcd_endWriteWindow();
+    }
+*/
 
 
 // ============================================================================
@@ -257,8 +282,7 @@ void gfx_text(int x, int y, const char* text, Color color)
         if (c >= 128)
             c = '?'; // fallback simple
 
-        const uint8_t* glyph =  reinterpret_cast<const uint8_t*>(font8x8_basic[c]);
-
+        const uint8_t* glyph = reinterpret_cast<const uint8_t*>(font8x8_basic[c]);
 
         for (int gy = 0; gy < 8; ++gy)
         {

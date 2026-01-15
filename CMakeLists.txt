@@ -49,6 +49,7 @@ idf_component_register(
         # --- Tâches FreeRTOS ---
         tasks/task_game.cpp
         tasks/task_input.cpp
+	tasks/task_audio.cpp
 
         # --- Assets ---
         assets/gfx/title.cpp

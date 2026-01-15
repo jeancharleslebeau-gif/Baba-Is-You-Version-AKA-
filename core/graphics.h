@@ -54,11 +54,16 @@ void gfx_blit(const uint16_t* pixels, int w, int h, int x, int y);
 
 
 // ============================================================================
-//  Atlas de tiles (ex: sprites BabaIsU)
+//  Blit d’une région rectangulaire dans un atlas 16 bits (RGB565)
+// ----------------------------------------------------------------------------
+//  - atlas = image brute (ex: 256×32) rangée ligne par ligne
+//  - srcX, srcY, srcW, srcH = rectangle source dans l’atlas
+//  - dstX, dstY = position de destination à l’écran
+//  - implémentation “DMA-friendly” : une ligne source = bloc contigu
 // ============================================================================
-void gfx_drawAtlas(
+void gfx_blitRegion(
     const uint16_t* atlas,
-    int atlasW, int atlasH,
+    int atlasW,
     int srcX, int srcY,
     int srcW, int srcH,
     int dstX, int dstY

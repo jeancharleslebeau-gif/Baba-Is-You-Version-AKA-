@@ -1,3 +1,4 @@
+
 /*
 ===============================================================================
   game.cpp — Implémentation de la logique de jeu
@@ -195,7 +196,7 @@ void game_load_level(int index) {
     }
 
     // Lecture de la musique choisie
-    audio_play_music_id(music);
+    audio_request_music(music);
 }
 
 

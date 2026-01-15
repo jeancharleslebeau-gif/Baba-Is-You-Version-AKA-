@@ -444,21 +444,33 @@ float gb_graphics::get_fps()
 {
 	return f32_fps_stat;
 }
+
 void gb_graphics::update()
 {
-	lcd_refresh();
+    lcd_refresh();
 
-	uint32_t u32_now = gb_get_millis();
-	if ( ( u32_now - u32_last_stat_date ) > 1000 )
-	{
-		uint32_t u32_draw_now = gb_ll_lcd_get_draw_count();
-		f32_fps_stat = 1000.0f*(u32_draw_now - u32_last_stat_count)/((float)(u32_now-u32_last_stat_date)) ;
-		u32_last_stat_date = u32_now;
-		u32_last_stat_count = u32_draw_now;
-	}
+    // Stats FPS
+    uint32_t now = gb_get_millis();
+    if ((now - u32_last_stat_date) > 1000)
+    {
+        uint32_t draw_now = gb_ll_lcd_get_draw_count();
+        f32_fps_stat = 1000.0f * (draw_now - u32_last_stat_count) / (float)(now - u32_last_stat_date);
+        u32_last_stat_date = now;
+        u32_last_stat_count = draw_now;
+    }
 
-	while( !lcd_refresh_completed() );
+    // Attendre la fin du DMA, mais sans bloquer
+    uint64_t start = gb_get_micros();
+    while (!lcd_refresh_completed())
+    {
+        if (gb_get_micros() - start > 20000) {
+            printf("ERROR: DMA completion timeout\n");
+            break;
+        }
+        vTaskDelay(1);
+    }
 }
+
 
 /*
 void graphics_basic::drawChar(int16_t x, int16_t y, unsigned char c, uint8_t size) {

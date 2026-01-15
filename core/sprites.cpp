@@ -5,7 +5,7 @@
   Rôle :
     - Mapper chaque ObjectType vers un index dans l’atlas.
     - Convertir cet index en coordonnées source (x,y,w,h).
-    - Dessiner une cellule via gfx_drawAtlas().
+    - Dessiner une cellule via gfx_blitRegion().
 
   Notes :
     - L’atlas utilisé fait 256×32 px (16 colonnes × 2 lignes).
@@ -20,6 +20,7 @@
 #include "sprites.h"
 #include "core/graphics.h"
 #include "assets/gfx/atlas.h"
+#include <cstdio>
 
 namespace baba {
 
@@ -110,17 +111,21 @@ SpriteRect sprite_rect_for(ObjectType t)
 // -----------------------------------------------------------------------------
 void draw_sprite(int x, int y, ObjectType t)
 {
+    if ((int)t < 0 || (int)t >= (int)ObjectType::Count) {
+        printf("INVALID TYPE: %d\n", (int)t);
+        return;
+    }
+
     SpriteRect r = sprite_rect_for(t);
 
-    gfx_drawAtlas(
+    // Nouvelle version : blit rectangulaire générique
+    gfx_blitRegion(
         getAtlasPixels(),
-        ATLAS_WIDTH,
-        ATLAS_HEIGHT,
+        ATLAS_WIDTH,   // stride réel de l’atlas (256 px)
         r.x, r.y,
         r.w, r.h,
         x, y
     );
 }
-
 
 } // namespace baba
