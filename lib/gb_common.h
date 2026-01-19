@@ -32,8 +32,8 @@ typedef uint8_t     gb_pixel_8; // 8 bits indexed color
 #define SCREEN_WIDTH            320
 #define SCREEN_HEIGHT           240
 //#define GB_AUDIO_SAMPLE_RATE    44100   //<! high quality, more ressource
-#define GB_AUDIO_SAMPLE_RATE    22050   //<! medium quality, medium ressource
-//#define GB_AUDIO_SAMPLE_RATE    11025   //<! low quality, low ressource
+//#define GB_AUDIO_SAMPLE_RATE    22050   //<! medium quality, medium ressource
+#define GB_AUDIO_SAMPLE_RATE    11025   //<! low quality, low ressource
 
 #define MOUNT_POINT             "/sdcard" // base path for files on SDcard
 

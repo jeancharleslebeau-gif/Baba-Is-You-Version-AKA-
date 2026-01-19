@@ -118,14 +118,17 @@ static void update_camera(const Grid& g, const PropertyTable& props,
     g_camera.x = centerX + g_camera.offsetX;
     g_camera.y = centerY + g_camera.offsetY;
 
-    // Clamp pour éviter de sortir de la grille
-    float maxX = static_cast<float>(g.width - VIEW_TILES_W);
-    float maxY = static_cast<float>(g.height - VIEW_TILES_H);
-    if (g_camera.x < 0.0f) g_camera.x = 0.0f;
-    if (g_camera.y < 0.0f) g_camera.y = 0.0f;
+    float minX = static_cast<float>(g.playMinX);
+    float minY = static_cast<float>(g.playMinY);
+    float maxX = static_cast<float>(g.playMaxX - VIEW_TILES_W + 1);
+    float maxY = static_cast<float>(g.playMaxY - VIEW_TILES_H + 1);
+
+    if (g_camera.x < minX) g_camera.x = minX;
+    if (g_camera.y < minY) g_camera.y = minY;
     if (g_camera.x > maxX) g_camera.x = maxX;
     if (g_camera.y > maxY) g_camera.y = maxY;
 }
+
 
 /*
 ===============================================================================
@@ -197,6 +200,9 @@ void game_load_level(int index) {
 
     // Lecture de la musique choisie
     audio_request_music(music);
+	
+	// Positionner la caméra
+	update_camera(g_state.grid, g_state.props, 0, 0);
 }
 
 
@@ -277,8 +283,13 @@ void game_draw() {
 
     for (int y = camTileY; y < endY; ++y) {
         for (int x = camTileX; x < endX; ++x) {
-            int screenX = (x - g_camera.x) * TILE_SIZE;
-            int screenY = (y - g_camera.y) * TILE_SIZE;
+            int screenX = static_cast<int>((x - g_camera.x) * TILE_SIZE);
+            int screenY = static_cast<int>((y - g_camera.y) * TILE_SIZE);
+
+            if (screenX >= SCREEN_W || screenX + TILE_SIZE <= 0 ||
+                screenY >= SCREEN_H || screenY + TILE_SIZE <= 0) {
+                continue;
+            }
 
             if (!g_state.grid.in_play_area(x, y)) {
                 gfx_fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE, 0x8410);
@@ -289,6 +300,7 @@ void game_draw() {
         }
     }
 }
+
 
 
 

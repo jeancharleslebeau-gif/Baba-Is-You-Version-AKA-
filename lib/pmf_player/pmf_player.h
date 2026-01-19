@@ -346,8 +346,20 @@ void pmf_player::mix_buffer_impl(pmf_mixer_buffer &buf_, unsigned num_samples_)
         (*buf++)+=T(sample_volume_l*smp)>>(16-channel_bits);
         (*buf++)+=T(sample_volume_r*(smp^sample_phase_shift))>>(16-channel_bits);
       }
-      else
-        (*buf++)+=T(sample_volume*smp)>>(16-channel_bits);
+	  else
+	  {
+			//==============================================================
+			// FIX: mono mixing with explicit 16-bit saturation
+			//==============================================================
+			int32_t mixed = (T(sample_volume * smp) >> (16 - channel_bits)) + *buf;
+
+			if (mixed > 32767)
+				mixed = 32767;
+			else if (mixed < -32768)
+				mixed = -32768;
+
+			(*buf++) = mixed;
+	  }
 
       // advance sample position
       sample_pos+=sample_speed;

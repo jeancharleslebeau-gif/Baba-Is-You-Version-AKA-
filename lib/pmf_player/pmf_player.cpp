@@ -28,405 +28,459 @@
 //============================================================================
 
 #include "pmf_player.h"
-//---------------------------------------------------------------------------
-
 
 //============================================================================
-// pmf_header
+// pmf_header : en-tête binaire du fichier PMF
 //============================================================================
 struct pmf_header
 {
-  char signature[4];
-  uint16_t version;
-  uint16_t flags; // e_pmf_flags
-  uint32_t file_size;
-  uint32_t sample_meta_offs;
-  uint32_t instrument_meta_offs;
-  uint32_t pattern_meta_offs;
-  uint32_t env_data_offs;
-  uint32_t nmap_data_offs;
-  uint32_t track_data_offs;
-  uint8_t initial_speed;
-  uint8_t initial_tempo;
-  uint16_t note_period_min;
-  uint16_t note_period_max;
-  uint16_t playlist_length;
-  uint8_t num_channels;
-  uint8_t num_patterns;
-  uint8_t num_instruments;
-  uint8_t num_samples;
-  uint8_t first_playlist_entry;
+  char     signature[4];          // "pmfx" (0x70 0x6d 0x66 0x78)
+  uint16_t version;               // version du format (0x1400 pour v1.4)
+  uint16_t flags;                 // e_pmf_flags
+  uint32_t file_size;             // taille totale du fichier
+  uint32_t sample_meta_offs;      // offset table des métadonnées de samples
+  uint32_t instrument_meta_offs;  // offset table des métadonnées d’instruments
+  uint32_t pattern_meta_offs;     // offset table des métadonnées de patterns
+  uint32_t env_data_offs;         // offset des données d’enveloppes
+  uint32_t nmap_data_offs;        // offset des note-maps
+  uint32_t track_data_offs;       // offset des données de pistes (patterns)
+  uint8_t  initial_speed;         // speed (ticks/row) initial
+  uint8_t  initial_tempo;         // tempo initial (BPM-ish)
+  uint16_t note_period_min;       // borne basse des periods valides
+  uint16_t note_period_max;       // borne haute des periods valides
+  uint16_t playlist_length;       // nombre d’entrées dans la playlist
+  uint8_t  num_channels;          // nombre de canaux dans les patterns
+  uint8_t  num_patterns;          // nombre de patterns
+  uint8_t  num_instruments;       // nombre d’instruments
+  uint8_t  num_samples;           // nombre de samples
+  uint8_t  first_playlist_entry;  // début de la playlist (table d’indices)
 };
-//----------------------------------------------------------------------------
 
+//============================================================================
+// PMF format config : offsets et tailles dans le fichier PMF
+//============================================================================
 
-//===========================================================================
-// PMF format config
-//===========================================================================
-// PMF config
-enum {pmf_file_version=0x1400}; // v1.4
-// PMF file structure
-enum {pmfcfg_offset_signature=PFC_OFFSETOF(pmf_header, signature)};
-enum {pmfcfg_offset_version=PFC_OFFSETOF(pmf_header, version)};
-enum {pmfcfg_offset_flags=PFC_OFFSETOF(pmf_header, flags)};
-enum {pmfcfg_offset_file_size=PFC_OFFSETOF(pmf_header, file_size)};
-enum {pmfcfg_offset_smp_meta_offs=PFC_OFFSETOF(pmf_header, sample_meta_offs)};
-enum {pmfcfg_offset_inst_meta_offs=PFC_OFFSETOF(pmf_header, instrument_meta_offs)};
-enum {pmfcfg_offset_pat_meta_offs=PFC_OFFSETOF(pmf_header, pattern_meta_offs)};
-enum {pmfcfg_offset_env_data_offs=PFC_OFFSETOF(pmf_header, env_data_offs)};
-enum {pmfcfg_offset_nmap_data_offs=PFC_OFFSETOF(pmf_header, nmap_data_offs)};
-enum {pmfcfg_offset_track_data_offs=PFC_OFFSETOF(pmf_header, track_data_offs)};
-enum {pmfcfg_offset_init_speed=PFC_OFFSETOF(pmf_header, initial_speed)};
-enum {pmfcfg_offset_init_tempo=PFC_OFFSETOF(pmf_header, initial_tempo)};
-enum {pmfcfg_offset_note_period_min=PFC_OFFSETOF(pmf_header, note_period_min)};
-enum {pmfcfg_offset_note_period_max=PFC_OFFSETOF(pmf_header, note_period_max)};
-enum {pmfcfg_offset_playlist_length=PFC_OFFSETOF(pmf_header, playlist_length)};
-enum {pmfcfg_offset_num_channels=PFC_OFFSETOF(pmf_header, num_channels)};
-enum {pmfcfg_offset_num_patterns=PFC_OFFSETOF(pmf_header, num_patterns)};
-enum {pmfcfg_offset_num_instruments=PFC_OFFSETOF(pmf_header, num_instruments)};
-enum {pmfcfg_offset_num_samples=PFC_OFFSETOF(pmf_header, num_samples)};
-enum {pmfcfg_offset_playlist=PFC_OFFSETOF(pmf_header, first_playlist_entry)};
-enum {pmfcfg_pattern_metadata_header_size=2};
-enum {pmfcfg_pattern_metadata_track_offset_size=2};
-enum {pmfcfg_offset_pattern_metadata_last_row=0};
-enum {pmfcfg_offset_pattern_metadata_track_offsets=2};
-// envelope configs
-enum {pmfcfg_offset_env_num_points=0};
-enum {pmfcfg_offset_env_loop_start=1};
-enum {pmfcfg_offset_env_loop_end=2};
-enum {pmfcfg_offset_env_sustain_loop_start=3};
-enum {pmfcfg_offset_env_sustain_loop_end=4};
-enum {pmfcfg_offset_env_points=6};
-enum {pmfcfg_envelope_point_size=4};
-enum {pmfcfg_offset_env_point_tick=0};
-enum {pmfcfg_offset_env_point_val=2};
-// note map config
-enum {pmfcfg_max_note_map_regions=8};
-enum {pmfcfg_offset_nmap_num_entries=0};
-enum {pmfcfg_offset_nmap_entries=1};
-enum {pmfcfg_nmap_entry_size_direct=2};
-enum {pmfcfg_nmap_entry_size_range=3};
-enum {pmgcfg_offset_nmap_entry_note_idx_offs=0};
-enum {pmgcfg_offset_nmap_entry_sample_idx=1};
-// bit-compression settings
-enum {pmfcfg_num_data_mask_bits=4};
-enum {pmfcfg_num_note_bits=7};       // max 10 octaves (0-9) (12*10=120)
-enum {pmfcfg_num_instrument_bits=6}; // max 64 instruments
-enum {pmfcfg_num_volume_bits=6};     // volume range [0, 63]
-enum {pmfcfg_num_effect_bits=4};     // effects 0-15
-enum {pmfcfg_num_effect_data_bits=8};
-// PMF flags
+enum { pmf_file_version = 0x1400 }; // v1.4
+
+// Offsets dans pmf_header
+enum { pmfcfg_offset_signature        = PFC_OFFSETOF(pmf_header, signature) };
+enum { pmfcfg_offset_version          = PFC_OFFSETOF(pmf_header, version) };
+enum { pmfcfg_offset_flags            = PFC_OFFSETOF(pmf_header, flags) };
+enum { pmfcfg_offset_file_size        = PFC_OFFSETOF(pmf_header, file_size) };
+enum { pmfcfg_offset_smp_meta_offs    = PFC_OFFSETOF(pmf_header, sample_meta_offs) };
+enum { pmfcfg_offset_inst_meta_offs   = PFC_OFFSETOF(pmf_header, instrument_meta_offs) };
+enum { pmfcfg_offset_pat_meta_offs    = PFC_OFFSETOF(pmf_header, pattern_meta_offs) };
+enum { pmfcfg_offset_env_data_offs    = PFC_OFFSETOF(pmf_header, env_data_offs) };
+enum { pmfcfg_offset_nmap_data_offs   = PFC_OFFSETOF(pmf_header, nmap_data_offs) };
+enum { pmfcfg_offset_track_data_offs  = PFC_OFFSETOF(pmf_header, track_data_offs) };
+enum { pmfcfg_offset_init_speed       = PFC_OFFSETOF(pmf_header, initial_speed) };
+enum { pmfcfg_offset_init_tempo       = PFC_OFFSETOF(pmf_header, initial_tempo) };
+enum { pmfcfg_offset_note_period_min  = PFC_OFFSETOF(pmf_header, note_period_min) };
+enum { pmfcfg_offset_note_period_max  = PFC_OFFSETOF(pmf_header, note_period_max) };
+enum { pmfcfg_offset_playlist_length  = PFC_OFFSETOF(pmf_header, playlist_length) };
+enum { pmfcfg_offset_num_channels     = PFC_OFFSETOF(pmf_header, num_channels) };
+enum { pmfcfg_offset_num_patterns     = PFC_OFFSETOF(pmf_header, num_patterns) };
+enum { pmfcfg_offset_num_instruments  = PFC_OFFSETOF(pmf_header, num_instruments) };
+enum { pmfcfg_offset_num_samples      = PFC_OFFSETOF(pmf_header, num_samples) };
+enum { pmfcfg_offset_playlist         = PFC_OFFSETOF(pmf_header, first_playlist_entry) };
+
+// Métadonnées de patterns
+enum { pmfcfg_pattern_metadata_header_size      = 2 };
+enum { pmfcfg_pattern_metadata_track_offset_size = 2 };
+enum { pmfcfg_offset_pattern_metadata_last_row  = 0 };
+enum { pmfcfg_offset_pattern_metadata_track_offsets = 2 };
+
+// Enveloppes
+enum { pmfcfg_offset_env_num_points        = 0 };
+enum { pmfcfg_offset_env_loop_start        = 1 };
+enum { pmfcfg_offset_env_loop_end          = 2 };
+enum { pmfcfg_offset_env_sustain_loop_start = 3 };
+enum { pmfcfg_offset_env_sustain_loop_end  = 4 };
+enum { pmfcfg_offset_env_points            = 6 };
+enum { pmfcfg_envelope_point_size          = 4 };
+enum { pmfcfg_offset_env_point_tick        = 0 };
+enum { pmfcfg_offset_env_point_val         = 2 };
+
+// Note map
+enum { pmfcfg_max_note_map_regions         = 8 };
+enum { pmfcfg_offset_nmap_num_entries      = 0 };
+enum { pmfcfg_offset_nmap_entries          = 1 };
+enum { pmfcfg_nmap_entry_size_direct       = 2 };
+enum { pmfcfg_nmap_entry_size_range        = 3 };
+enum { pmgcfg_offset_nmap_entry_note_idx_offs = 0 };
+enum { pmgcfg_offset_nmap_entry_sample_idx = 1 };
+
+// Bit-compression
+enum { pmfcfg_num_data_mask_bits   = 4 };
+enum { pmfcfg_num_note_bits        = 7 };  // max 10 octaves (0-9) (12*10=120)
+enum { pmfcfg_num_instrument_bits  = 6 };  // max 64 instruments
+enum { pmfcfg_num_volume_bits      = 6 };  // volume [0,63]
+enum { pmfcfg_num_effect_bits      = 4 };  // effets 0-15
+enum { pmfcfg_num_effect_data_bits = 8 };
+
+// Flags PMF
 enum e_pmf_flags
 {
-  pmfflag_linear_freq_table  =0x01,  // 0=Amiga, 1=linear
+  pmfflag_linear_freq_table = 0x01, // 0 = Amiga, 1 = table linéaire
 };
-// PMF special notes
-enum {pmfcfg_note_cut=120};
-enum {pmfcfg_note_off=121};
-// PMF effects
-enum {num_subfx_value_bits=4};
-enum {subfx_value_mask=~(unsigned(-1)<<num_subfx_value_bits)};
+
+// Notes spéciales
+enum { pmfcfg_note_cut = 120 };
+enum { pmfcfg_note_off = 121 };
+
+// Effets volume/pan
+enum { num_subfx_value_bits = 4 };
+enum { subfx_value_mask     = ~(unsigned(-1) << num_subfx_value_bits) };
+
 enum e_pmfx_volslide_type
 {
-  pmffx_volsldtype_down      =0x00,
-  pmffx_volsldtype_up        =0x10,
-  pmffx_volsldtype_fine_down =0x20,
-  pmffx_volsldtype_fine_up   =0x30,
-  //----
-  pmffx_volsldtype_mask      =0x30,
-  pmffx_volsldtype_fine_mask =0x20
+  pmffx_volsldtype_down      = 0x00,
+  pmffx_volsldtype_up        = 0x10,
+  pmffx_volsldtype_fine_down = 0x20,
+  pmffx_volsldtype_fine_up   = 0x30,
+  pmffx_volsldtype_mask      = 0x30,
+  pmffx_volsldtype_fine_mask = 0x20
 };
+
 enum e_pmfx_panslide_type
 {
-  pmffx_pansldtype_left        =0x80,
-  pmffx_pansldtype_right       =0xa0,
-  pmffx_pansldtype_fine_left   =0xc0,
-  pmffx_pansldtype_fine_right  =0xe0,
-  //----
-  pmffx_pansldtype_val_mask    =0x0f,
-  pmffx_pansldtype_dir_mask    =0x20,
-  pmffx_pansldtype_fine_mask   =0x40,
-  pmffx_pansldtype_enable_mask =0x80
+  pmffx_pansldtype_left        = 0x80,
+  pmffx_pansldtype_right       = 0xa0,
+  pmffx_pansldtype_fine_left   = 0xc0,
+  pmffx_pansldtype_fine_right  = 0xe0,
+  pmffx_pansldtype_val_mask    = 0x0f,
+  pmffx_pansldtype_dir_mask    = 0x20,
+  pmffx_pansldtype_fine_mask   = 0x40,
+  pmffx_pansldtype_enable_mask = 0x80
 };
+
 enum e_pmf_voleffect
 {
-  pmfvolfx_vol_slide            =0x40,
-  pmfvolfx_vol_slide_down       =0x40,
-  pmfvolfx_vol_slide_up         =0x50,
-  pmfvolfx_vol_slide_fine_down  =0x60,
-  pmfvolfx_vol_slide_fine_up    =0x70,
-  pmfvolfx_note_slide_down      =0x80,
-  pmfvolfx_note_slide_up        =0x90,
-  pmfvolfx_note_slide           =0xa0,
-  pmfvolfx_set_vibrato_speed    =0xb0,
-  pmfvolfx_vibrato              =0xc0,
-  pmfvolfx_set_panning          =0xd0,
-  pmfvolfx_pan_slide_fine_left  =0xe0,
-  pmfvolfx_pan_slide_fine_right =0xf0,
+  pmfvolfx_vol_slide            = 0x40,
+  pmfvolfx_vol_slide_down       = 0x40,
+  pmfvolfx_vol_slide_up         = 0x50,
+  pmfvolfx_vol_slide_fine_down  = 0x60,
+  pmfvolfx_vol_slide_fine_up    = 0x70,
+  pmfvolfx_note_slide_down      = 0x80,
+  pmfvolfx_note_slide_up        = 0x90,
+  pmfvolfx_note_slide           = 0xa0,
+  pmfvolfx_set_vibrato_speed    = 0xb0,
+  pmfvolfx_vibrato              = 0xc0,
+  pmfvolfx_set_panning          = 0xd0,
+  pmfvolfx_pan_slide_fine_left  = 0xe0,
+  pmfvolfx_pan_slide_fine_right = 0xf0,
 };
-// waveform tables
-static const int8_t PROGMEM s_waveforms[3][32]=
+
+// Tables de formes d’onde pour vibrato/tremolo
+static const int8_t PROGMEM s_waveforms[3][32] =
 {
-  {6, 19, 31, 43, 54, 65, 76, 85, 94, 102, 109, 115, 120, 123, 126, 127, 127, 126, 123, 120, 115, 109, 102, 94, 85, 76, 65, 54, 43, 31, 19, 6}, // sine-wave
-  {-2, -6, -10, -14, -18, -22, -26, -30, -34, -38, -42, -46, -50, -54, -58, -62, -66, -70, -74, -78, -82, -86, -90, -94, -98, -102, -106, -110, -114, -118, -122, -126}, // ramp down-wave
-  {127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127}, // square-wave
+  // sinusoïde
+  { 6, 19, 31, 43, 54, 65, 76, 85, 94, 102, 109, 115, 120, 123, 126, 127,
+    127, 126, 123, 120, 115, 109, 102, 94, 85, 76, 65, 54, 43, 31, 19, 6 },
+  // rampe descendante
+  { -2, -6, -10, -14, -18, -22, -26, -30, -34, -38, -42, -46, -50, -54, -58, -62,
+    -66, -70, -74, -78, -82, -86, -90, -94, -98, -102, -106, -110, -114, -118, -122, -126 },
+  // carré
+  { 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127,
+    127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127 },
 };
-//---------------------------------------------------------------------------
 
+//============================================================================
+// Note periods
+//============================================================================
+enum { note_slide_down_target_period = 32767 };
+enum { note_slide_up_target_period   = 1 };
 
-//===========================================================================
-// PMF note periods
-//===========================================================================
-enum {note_slide_down_target_period=32767};
-enum {note_slide_up_target_period=1};
-//---------------------------------------------------------------------------
-
-
-//===========================================================================
-// local helper functions
-//===========================================================================
+//============================================================================
+// Helpers locaux
+//============================================================================
 namespace
 {
-  //=========================================================================
-  // read bits
-  //=========================================================================
-  uint8_t read_bits(const uint8_t *&ptr_, uint8_t &bit_pos_, uint8_t num_bits_)
+  // Lecture de bits dans un flux compressé
+  uint8_t read_bits(const uint8_t *&ptr, uint8_t &bit_pos, uint8_t num_bits)
   {
-    // read bits from the bit stream
-    uint8_t v=pgm_read_byte(ptr_)>>bit_pos_;
-    bit_pos_+=num_bits_;
-    if(bit_pos_>7)
+    uint8_t v = pgm_read_byte(ptr) >> bit_pos;
+    bit_pos += num_bits;
+    if (bit_pos > 7)
     {
-      ++ptr_;
-      if(bit_pos_-=8)
-        v|=pgm_read_byte(ptr_)<<(num_bits_-bit_pos_);
+      ++ptr;
+      if (bit_pos -= 8)
+        v |= pgm_read_byte(ptr) << (num_bits - bit_pos);
     }
     return v;
   }
-  //-------------------------------------------------------------------------
 
-  //=========================================================================
-  // fast_exp2
-  //=========================================================================
-  float fast_exp2(float x_)
+  // Approximation rapide de 2^x (utilisée pour les périodes non linéaires)
+  float fast_exp2(float x)
   {
-    // map x_ to range [0, 0.5]
-    int adjustment=0;
-    uint8_t int_arg=uint8_t(x_);
-    x_-=int_arg;
-    if(x_>0.5f)
+    int adjustment = 0;
+    uint8_t int_arg = uint8_t(x);
+    x -= int_arg;
+    if (x > 0.5f)
     {
-      adjustment=1;
-      x_-=0.5f;
+      adjustment = 1;
+      x -= 0.5f;
     }
 
-    // calculate 2^x_ approximation
-    float x2=x_*x_;
-    float q=20.8189237930062f+x2;
-    float x_p=x_*(7.2152891521493f+0.0576900723731f*x2);
-    float res=(1<<int_arg)*(q+x_p)/(q-x_p);
-    if(adjustment)
-      res*=1.4142135623730950488f;
+    float x2 = x * x;
+    float q  = 20.8189237930062f + x2;
+    float x_p = x * (7.2152891521493f + 0.0576900723731f * x2);
+    float res = (1 << int_arg) * (q + x_p) / (q - x_p);
+    if (adjustment)
+      res *= 1.4142135623730950488f; // sqrt(2)
     return res;
   }
-} // namespace <anonymous>
-//---------------------------------------------------------------------------
+} // namespace
 
+//============================================================================
+// pmf_player : construction / destruction
+//============================================================================
 
-//===========================================================================
-// pmf_player
-//===========================================================================
 pmf_player::pmf_player()
+  : m_pmf_file(nullptr)
+  , m_sampling_freq(0)
+  , m_row_callback(nullptr)
+  , m_tick_callback(nullptr)
+  , m_speed(0)
 {
-  m_pmf_file=0;
-  m_sampling_freq=0;
-  m_row_callback=0;
-  m_tick_callback=0;
-  m_speed=0;
 }
-//----
 
+// Arrêt propre à la destruction
 pmf_player::~pmf_player()
 {
   stop();
 }
-//----
 
-void pmf_player::load(const void *pmem_pmf_file_)
+//============================================================================
+// Chargement du fichier PMF
+//============================================================================
+
+void pmf_player::load(const void *pmem_pmf_file)
 {
-  // check for valid PMF file
-  const uint8_t *pmf_file=static_cast<const uint8_t*>(pmem_pmf_file_);
-  if(pgm_read_dword(pmf_file+pmfcfg_offset_signature)!=0x78666d70)
+  if (!pmem_pmf_file)
+  {
+    PMF_SERIAL_LOG("Error: Null PMF pointer.\r\n");
+    return;
+  }
+
+  const uint8_t *pmf_file = static_cast<const uint8_t*>(pmem_pmf_file);
+
+  // Vérifie la signature "pmfx" (0x70 0x6d 0x66 0x78)
+  if (pgm_read_dword(pmf_file + pmfcfg_offset_signature) != 0x78666d70)
   {
     PMF_SERIAL_LOG("Error: Invalid PMF file. Please use pmf_converter to generate the file.\r\n");
     return;
   }
-  if((pgm_read_word(pmf_file+pmfcfg_offset_version)&0xfff0)!=pmf_file_version)
+
+  // Vérifie la version (on masque les 4 bits de révision)
+  const uint16_t file_ver = pgm_read_word(pmf_file + pmfcfg_offset_version);
+  if ((file_ver & 0xfff0) != pmf_file_version)
   {
     PMF_SERIAL_LOG("Error: PMF file version mismatch. Please use matching pmf_converter to generate the file.\r\n");
     return;
   }
 
-  // read PMF properties
-  m_pmf_file=pmf_file;
-  m_num_pattern_channels=pgm_read_byte(m_pmf_file+pmfcfg_offset_num_channels);
-  m_num_instruments=pgm_read_byte(m_pmf_file+pmfcfg_offset_num_instruments);
-  m_num_samples=pgm_read_byte(m_pmf_file+pmfcfg_offset_num_samples);
+  // Lecture des propriétés de base
+  m_pmf_file            = pmf_file;
+  m_num_pattern_channels = pgm_read_byte(m_pmf_file + pmfcfg_offset_num_channels);
+  m_num_instruments      = pgm_read_byte(m_pmf_file + pmfcfg_offset_num_instruments);
+  m_num_samples          = pgm_read_byte(m_pmf_file + pmfcfg_offset_num_samples);
+
+  // Limite le nombre de canaux de lecture à pmfplayer_max_channels
   enable_playback_channels(m_num_pattern_channels);
-  m_pmf_flags=pgm_read_word(m_pmf_file+pmfcfg_offset_flags);
-  m_note_slide_speed=m_pmf_flags&pmfflag_linear_freq_table?4:2;
+
+  m_pmf_flags       = pgm_read_word(m_pmf_file + pmfcfg_offset_flags);
+  m_note_slide_speed = (m_pmf_flags & pmfflag_linear_freq_table) ? 4 : 2;
+
   PMF_SERIAL_LOG("PMF file loaded (%i channels)\r\n", m_num_pattern_channels);
 }
-//----
 
-void pmf_player::enable_playback_channels(uint8_t num_channels_)
-{
-  if(m_pmf_file)
-    m_num_playback_channels=num_channels_<pmfplayer_max_channels?num_channels_:pmfplayer_max_channels;
-}
-//----
+//============================================================================
+// Configuration des callbacks et canaux
+//============================================================================
 
-void pmf_player::set_row_callback(pmf_row_callback_t callback_, void *custom_data_)
+void pmf_player::enable_playback_channels(uint8_t num_channels)
 {
-  m_row_callback=callback_;
-  m_row_callback_custom_data=custom_data_;
-}
-//----
+  if (!m_pmf_file)
+    return;
 
-void pmf_player::set_tick_callback(pmf_tick_callback_t callback_, void *custom_data_)
-{
-  m_tick_callback=callback_;
-  m_tick_callback_custom_data=custom_data_;
+  // Clamp sur pmfplayer_max_channels
+  m_num_playback_channels =
+    (num_channels < pmfplayer_max_channels) ? num_channels : pmfplayer_max_channels;
 }
-//---------------------------------------------------------------------------
+
+void pmf_player::set_row_callback(pmf_row_callback_t callback, void *custom_data)
+{
+  m_row_callback = callback;
+  m_row_callback_custom_data = custom_data;
+}
+
+void pmf_player::set_tick_callback(pmf_tick_callback_t callback, void *custom_data)
+{
+  m_tick_callback = callback;
+  m_tick_callback_custom_data = custom_data;
+}
+
+//============================================================================
+// Accesseurs simples
+//============================================================================
 
 uint8_t pmf_player::num_pattern_channels() const
 {
-  return m_pmf_file?m_num_pattern_channels:0;
+  return m_pmf_file ? m_num_pattern_channels : 0;
 }
-//----
 
 uint8_t pmf_player::num_playback_channels() const
 {
-  return m_pmf_file?m_num_playback_channels:0;
+  return m_pmf_file ? m_num_playback_channels : 0;
 }
-//----
 
 uint16_t pmf_player::playlist_length() const
 {
-  return m_pmf_file?pgm_read_word(m_pmf_file+pmfcfg_offset_playlist_length):0;
+  return m_pmf_file ? pgm_read_word(m_pmf_file + pmfcfg_offset_playlist_length) : 0;
 }
-//---------------------------------------------------------------------------
 
-void pmf_player::start(uint32_t sampling_freq_, uint16_t playlist_pos_)
+//============================================================================
+// Démarrage / arrêt de la lecture
+//============================================================================
+
+void pmf_player::start(uint32_t sampling_freq, uint16_t playlist_pos)
 {
-  // initialize channels
-  if(!m_pmf_file)
+  if (!m_pmf_file)
     return;
+
+  // Reset complet des canaux
   memset(m_channels, 0, sizeof(m_channels));
-  uint16_t playlist_len=pgm_read_word(m_pmf_file+pmfcfg_offset_playlist_length);
-  for(unsigned ci=0; ci<m_num_playback_channels; ++ci)
+
+  const uint16_t playlist_len =
+    pgm_read_word(m_pmf_file + pmfcfg_offset_playlist_length);
+
+  // Initialisation des canaux audio
+  for (unsigned ci = 0; ci < m_num_playback_channels; ++ci)
   {
-    audio_channel &chl=m_channels[ci];
-    chl.sample_panning=pgm_read_byte(m_pmf_file+pmfcfg_offset_playlist+playlist_len+ci);
-    chl.fxmem_vol_slide_spd=pmffx_volsldtype_down|0x01;
-    chl.vol_env.value=0xffff;
-    chl.pitch_env.value=0x8000;
+    audio_channel &chl = m_channels[ci];
+    chl.sample_panning =
+      pgm_read_byte(m_pmf_file + pmfcfg_offset_playlist + playlist_len + ci);
+    chl.fxmem_vol_slide_spd = pmfvolfx_vol_slide_down | 0x01;
+    chl.vol_env.value   = 0xffff;
+    chl.pitch_env.value = 0x8000;
   }
 
-  // init playback state
-  m_sampling_freq=get_sampling_freq(sampling_freq_);
-  m_num_processed_pattern_channels=min(m_num_pattern_channels, m_num_playback_channels);
-  init_pattern(playlist_pos_<playlist_len?playlist_pos_:0);
-  m_speed=pgm_read_byte(m_pmf_file+pmfcfg_offset_init_speed);
-  m_note_period_min=pgm_read_word(m_pmf_file+pmfcfg_offset_note_period_min);
-  m_note_period_max=pgm_read_word(m_pmf_file+pmfcfg_offset_note_period_max);
-  m_num_batch_samples=(m_sampling_freq*125)/long(pgm_read_byte(m_pmf_file+pmfcfg_offset_init_tempo)*50);
-  m_current_row_tick=m_speed-1;
-  m_arpeggio_counter=0;
-  m_pattern_delay=1;
+  // État de lecture
+  m_sampling_freq = get_sampling_freq(sampling_freq);
+  m_num_processed_pattern_channels =
+    min(m_num_pattern_channels, m_num_playback_channels);
 
-  // start playback
-  m_batch_pos=0;
-  start_playback(sampling_freq_);
+  const uint16_t clamped_pos =
+    (playlist_pos < playlist_len) ? playlist_pos : 0;
+  init_pattern(clamped_pos);
+
+  m_speed           = pgm_read_byte(m_pmf_file + pmfcfg_offset_init_speed);
+  m_note_period_min = pgm_read_word(m_pmf_file + pmfcfg_offset_note_period_min);
+  m_note_period_max = pgm_read_word(m_pmf_file + pmfcfg_offset_note_period_max);
+
+  const uint8_t init_tempo =
+    pgm_read_byte(m_pmf_file + pmfcfg_offset_init_tempo);
+  m_num_batch_samples =
+    (m_sampling_freq * 125) / long(init_tempo * 50);
+  m_num_batch_samples /= 2;
+  m_current_row_tick = m_speed ? (m_speed - 1) : 0;
+  m_arpeggio_counter = 0;
+  m_pattern_delay    = 1;
+
+  // Démarre le backend audio
+  m_batch_pos = 0;
+  start_playback(sampling_freq);
+
   PMF_SERIAL_LOG("PMF playback started (%i channels)\r\n", m_num_playback_channels);
 }
-//----
 
 void pmf_player::stop()
 {
-  if(m_speed)
+  if (m_speed)
     stop_playback();
-  m_speed=0;
+  m_speed = 0;
 }
-//----
+
+//============================================================================
+// Boucle de mise à jour (backend "pull" classique)
+//============================================================================
 
 void pmf_player::update()
 {
-  // check if audio buffer should be updated
-  if(!m_note_slide_speed)
-    return;
-  pmf_mixer_buffer subbuffer=get_mixer_buffer();
-  if(!subbuffer.num_samples)
-    return;
-
-  // update audio buffer
-  do
-  {
-    // mix batch of samples
-    uint16_t batch_left=m_num_batch_samples-m_batch_pos;
-    unsigned num_samples=min(subbuffer.num_samples, batch_left);
-    mix_buffer(subbuffer, num_samples);
-    m_batch_pos+=num_samples;
-
-    // check for new batch
-    if(m_batch_pos==m_num_batch_samples)
-    {
-      if(++m_current_row_tick==m_speed)
-      {
-        if(!--m_pattern_delay)
-        {
-          m_pattern_delay=1;
-          process_pattern_row();
-        }
-        m_current_row_tick=0;
-      }
-      else
-        apply_channel_effects();
-      if(m_num_instruments)
-        evaluate_envelopes();
-      if(m_tick_callback)
-        (*m_tick_callback)(m_tick_callback_custom_data);
-      m_batch_pos=0;
-    }
-  } while(subbuffer.num_samples);
-}
-
-//---------------------------------------------------------------------------
-
-void pmf_player::mix(int16_t *out_buffer, unsigned num_samples)
-{
+  // Si le player n’est pas initialisé correctement, on sort
   if (!m_note_slide_speed || !m_pmf_file || !m_speed)
     return;
 
+  pmf_mixer_buffer subbuffer = get_mixer_buffer();
+  if (!subbuffer.num_samples)
+    return;
+
+  do
+  {
+    const uint16_t batch_left = m_num_batch_samples - m_batch_pos;
+    const unsigned num_samples =
+      min(subbuffer.num_samples, batch_left);
+
+    mix_buffer(subbuffer, num_samples);
+    m_batch_pos += num_samples;
+
+    if (m_batch_pos == m_num_batch_samples)
+    {
+      // Tick suivant
+      if (++m_current_row_tick == m_speed)
+      {
+        if (!--m_pattern_delay)
+        {
+          m_pattern_delay = 1;
+          process_pattern_row();
+        }
+        m_current_row_tick = 0;
+      }
+      else
+      {
+        apply_channel_effects();
+      }
+
+      if (m_num_instruments)
+        evaluate_envelopes();
+
+      if (m_tick_callback)
+        (*m_tick_callback)(m_tick_callback_custom_data);
+
+      m_batch_pos = 0;
+    }
+  } while (subbuffer.num_samples);
+}
+
+//============================================================================
+// mix() : version Gamebuino-AKA, appelée par le callback audio
+//============================================================================
+
+void pmf_player::mix(int16_t *out_buffer, unsigned num_samples)
+{
+  // Sécurité : si le player n’est pas en état de lecture, on ne touche pas au buffer
+  if (!m_note_slide_speed || !m_pmf_file || !m_speed || !out_buffer || !num_samples)
+    return;
+
   pmf_mixer_buffer subbuffer;
-  subbuffer.begin = out_buffer;
+  subbuffer.begin       = out_buffer;
   subbuffer.num_samples = num_samples;
 
   do
   {
-    // mix batch of samples
-    uint16_t batch_left = m_num_batch_samples - m_batch_pos;
-    unsigned chunk = subbuffer.num_samples < batch_left ? subbuffer.num_samples : batch_left;
+    const uint16_t batch_left = m_num_batch_samples - m_batch_pos;
+    const unsigned chunk =
+      (subbuffer.num_samples < batch_left) ? subbuffer.num_samples : batch_left;
 
     if (chunk == 0)
       break;
 
-    // appelle le mixeur interne (implémenté via mix_buffer_impl)
+    // Mix interne (implémenté via mix_buffer_impl)
     mix_buffer(subbuffer, chunk);
     m_batch_pos += chunk;
 
-    // fin de batch → avancer la musique (ticks, rows, effets…)
+    // Fin de batch → avance la musique (ticks, rows, effets…)
     if (m_batch_pos == m_num_batch_samples)
     {
       if (++m_current_row_tick == m_speed)
@@ -454,329 +508,451 @@ void pmf_player::mix(int16_t *out_buffer, unsigned num_samples)
   } while (subbuffer.num_samples);
 }
 
-//---------------------------------------------------------------------------
+//============================================================================
+// État de lecture / infos de canaux
+//============================================================================
 
 bool pmf_player::is_playing() const
 {
-  return m_speed!=0;
+  return m_speed != 0;
 }
-//----
 
 uint8_t pmf_player::playlist_pos() const
 {
-  return m_speed?m_current_pattern_playlist_pos:0;
-}  
-//----
+  return m_speed ? m_current_pattern_playlist_pos : 0;
+}
 
 uint8_t pmf_player::pattern_row() const
 {
-  return m_speed?m_current_pattern_row_idx:0;
-}  
-//----
+  return m_speed ? m_current_pattern_row_idx : 0;
+}
 
 uint8_t pmf_player::pattern_speed() const
 {
-  return m_speed?m_speed:0;
+  return m_speed ? m_speed : 0;
 }
-//----
 
-pmf_channel_info pmf_player::channel_info(uint8_t channel_idx_) const
+pmf_channel_info pmf_player::channel_info(uint8_t channel_idx) const
 {
   pmf_channel_info info;
-  if(channel_idx_<m_num_playback_channels)
+
+  if (channel_idx < m_num_playback_channels)
   {
-    // collect channel info
-    const audio_channel &chl=m_channels[channel_idx_];
-    info.base_note=chl.base_note_idx;
-    info.volume=chl.sample_volume;
-    info.effect=chl.effect;
-    info.effect_data=chl.effect_data;
-    info.note_hit=chl.note_hit;
+    const audio_channel &chl = m_channels[channel_idx];
+    info.base_note   = chl.base_note_idx;
+    info.volume      = chl.sample_volume;
+    info.effect      = chl.effect;
+    info.effect_data = chl.effect_data;
+    info.note_hit    = chl.note_hit;
   }
   else
   {
-    // setup no-info
-    info.base_note=0xff;
-    info.volume=0;
-    info.effect=0xff;
-    info.effect_data=0;
-    info.note_hit=0;
+    // Canal invalide → info neutre
+    info.base_note   = 0xff;
+    info.volume      = 0;
+    info.effect      = 0xff;
+    info.effect_data = 0;
+    info.note_hit    = 0;
   }
   return info;
 }
-//---------------------------------------------------------------------------
 
-void pmf_player::apply_channel_effect_volume_slide(audio_channel &chl_)
+//============================================================================
+// Effets de canal (volume / pitch / vibrato / etc.)
+//============================================================================
+
+void pmf_player::apply_channel_effect_volume_slide(audio_channel &chl)
 {
-  // slide volume either up/down defined by effect
-  int8_t vdelta=(chl_.fxmem_vol_slide_spd&0xf)<<2;
-  int16_t v=int16_t(chl_.sample_volume)+((chl_.fxmem_vol_slide_spd&pmffx_volsldtype_mask)==pmffx_volsldtype_down?-vdelta:vdelta);
-  chl_.sample_volume=v<0?0:v>255?255:v;
+  // Slide de volume vers le haut ou le bas selon fxmem_vol_slide_spd
+  const int8_t vdelta = (chl.fxmem_vol_slide_spd & 0x0f) << 2;
+  int16_t v = int16_t(chl.sample_volume) +
+              (((chl.fxmem_vol_slide_spd & pmffx_volsldtype_mask) == pmffx_volsldtype_down)
+                 ? -vdelta
+                 :  vdelta);
+  if (v < 0)   v = 0;
+  if (v > 255) v = 255;
+  chl.sample_volume = uint8_t(v);
 }
-//----
 
-void pmf_player::apply_channel_effect_note_slide(audio_channel &chl_)
+void pmf_player::apply_channel_effect_note_slide(audio_channel &chl)
 {
-  // slide note period towards target period and clamp the period to target
-  if(!chl_.sample_speed)
+  // Slide de la période vers la cible, clampée
+  if (!chl.sample_speed)
     return;
-  int16_t note_period=chl_.note_period;
-  int16_t note_target_prd=chl_.fxmem_note_slide_prd;
-  int16_t slide_spd=(note_period<note_target_prd?chl_.fxmem_note_slide_spd:-chl_.fxmem_note_slide_spd)*m_note_slide_speed;
-  note_period+=slide_spd;
-  note_period=((slide_spd>0)^(note_period<note_target_prd))?note_target_prd:note_period;
-  chl_.note_period=note_period;
-  chl_.sample_speed=note_period<m_note_period_min || note_period>m_note_period_max?0:get_sample_speed(chl_.note_period, chl_.sample_speed>=0);
-}
-//----
 
-void pmf_player::apply_channel_effect_vibrato(audio_channel &chl_)
-{
-  if(!chl_.sample_speed)
-    return;
-  uint8_t wave_idx=chl_.fxmem_vibrato_wave&3;
-  int8_t vibrato_pos=chl_.fxmem_vibrato_pos;
-  int8_t wave_sample=vibrato_pos<0?-int8_t(pgm_read_byte(&s_waveforms[wave_idx][~vibrato_pos])):pgm_read_byte(&s_waveforms[wave_idx][vibrato_pos]);
-  chl_.sample_speed=get_sample_speed(chl_.note_period+(int16_t(wave_sample*chl_.fxmem_vibrato_depth)>>8), chl_.sample_speed>=0);
-  if((chl_.fxmem_vibrato_pos+=chl_.fxmem_vibrato_spd)>31)
-    chl_.fxmem_vibrato_pos-=64;
+  int16_t note_period     = chl.note_period;
+  const int16_t target_prd = chl.fxmem_note_slide_prd;
+  const int16_t slide_spd  =
+    (note_period < target_prd ? chl.fxmem_note_slide_spd : -chl.fxmem_note_slide_spd)
+    * m_note_slide_speed;
+
+  note_period += slide_spd;
+  // Si on dépasse la cible, on clamp
+  if ( (slide_spd > 0) ^ (note_period < target_prd) )
+    note_period = target_prd;
+
+  chl.note_period = note_period;
+
+  if (note_period < m_note_period_min || note_period > m_note_period_max)
+  {
+    chl.sample_speed = 0;
+  }
+  else
+  {
+    chl.sample_speed = get_sample_speed(chl.note_period, (chl.sample_speed >= 0));
+  }
 }
-//----
+
+void pmf_player::apply_channel_effect_vibrato(audio_channel &chl)
+{
+  if (!chl.sample_speed)
+    return;
+
+  const uint8_t wave_idx = chl.fxmem_vibrato_wave & 3;
+  int8_t vibrato_pos     = chl.fxmem_vibrato_pos;
+
+  int8_t wave_sample =
+    (vibrato_pos < 0)
+      ? -int8_t(pgm_read_byte(&s_waveforms[wave_idx][~vibrato_pos]))
+      :  int8_t(pgm_read_byte(&s_waveforms[wave_idx][ vibrato_pos ]));
+
+  const int16_t offset =
+    int16_t(wave_sample * chl.fxmem_vibrato_depth) >> 8;
+
+  chl.sample_speed =
+    get_sample_speed(chl.note_period + offset, (chl.sample_speed >= 0));
+
+  if ( (chl.fxmem_vibrato_pos += chl.fxmem_vibrato_spd) > 31 )
+    chl.fxmem_vibrato_pos -= 64;
+}
 
 void pmf_player::apply_channel_effects()
 {
-  if(++m_arpeggio_counter==3)
-    m_arpeggio_counter=0;
-  for(unsigned ci=0; ci<m_num_playback_channels; ++ci)
+  if (++m_arpeggio_counter == 3)
+    m_arpeggio_counter = 0;
+
+  for (unsigned ci = 0; ci < m_num_playback_channels; ++ci)
   {
-    // apply active volume effect
-    audio_channel &chl=m_channels[ci];
-    chl.note_hit=0;
-    switch(chl.vol_effect)
+    audio_channel &chl = m_channels[ci];
+    chl.note_hit = 0;
+
+    // Effet de volume (colonne volume)
+    switch (chl.vol_effect)
     {
       case pmfvolfx_vol_slide: apply_channel_effect_volume_slide(chl); break;
-      case pmfvolfx_note_slide: apply_channel_effect_note_slide(chl); break;
-      case pmfvolfx_vibrato: apply_channel_effect_vibrato(chl); break;
+      case pmfvolfx_note_slide: apply_channel_effect_note_slide(chl);  break;
+      case pmfvolfx_vibrato:    apply_channel_effect_vibrato(chl);     break;
+      default: break;
     }
 
-    // apply active effect
-    switch(chl.effect)
+    // Effet principal (colonne effet)
+    switch (chl.effect)
     {
       case pmffx_arpeggio:
       {
-        // alternate between 3 periods defined by arpeggio parameters
-        if(!chl.sample_speed)
+        if (!chl.sample_speed)
           break;
-        uint8_t base_note_idx=chl.base_note_idx&127;
-        uint16_t note_period=get_note_period(base_note_idx+((chl.fxmem_arpeggio>>(4*m_arpeggio_counter))&0xf), chl.sample_finetune);
-        chl.sample_speed=get_sample_speed(note_period, chl.sample_speed>=0);
+        const uint8_t base_note_idx = chl.base_note_idx & 127;
+        const uint16_t note_period =
+          get_note_period(base_note_idx +
+                          ((chl.fxmem_arpeggio >> (4 * m_arpeggio_counter)) & 0x0f),
+                          chl.sample_finetune);
+        chl.sample_speed = get_sample_speed(note_period, (chl.sample_speed >= 0));
       } break;
 
-      case pmffx_note_slide: apply_channel_effect_note_slide(chl); break;
+      case pmffx_note_slide:
+        apply_channel_effect_note_slide(chl);
+        break;
 
       case pmffx_note_vol_slide:
       {
-        if(chl.fxmem_note_slide_spd<0xe0)
+        if (chl.fxmem_note_slide_spd < 0xe0)
           apply_channel_effect_note_slide(chl);
-        if(!(chl.fxmem_vol_slide_spd&pmffx_volsldtype_fine_mask))
+        if (!(chl.fxmem_vol_slide_spd & pmffx_volsldtype_fine_mask))
           apply_channel_effect_volume_slide(chl);
       } break;
 
-      case pmffx_volume_slide: apply_channel_effect_volume_slide(chl); break;
+      case pmffx_volume_slide:
+        apply_channel_effect_volume_slide(chl);
+        break;
 
-      case pmffx_vibrato: apply_channel_effect_vibrato(chl); break;
+      case pmffx_vibrato:
+        apply_channel_effect_vibrato(chl);
+        break;
 
       case pmffx_vibrato_vol_slide:
       {
         apply_channel_effect_vibrato(chl);
-        if(!(chl.fxmem_vol_slide_spd&pmffx_volsldtype_fine_mask))
+        if (!(chl.fxmem_vol_slide_spd & pmffx_volsldtype_fine_mask))
           apply_channel_effect_volume_slide(chl);
       } break;
 
       case pmffx_retrig_vol_slide:
       {
-        if(!--chl.fxmem_retrig_count)
+        if (!--chl.fxmem_retrig_count)
         {
-          uint8_t effect_data=chl.effect_data;
-          chl.fxmem_retrig_count=effect_data&0xf;
-          int vol=chl.sample_volume;
-          effect_data>>=4;
-          switch(effect_data)
+          uint8_t effect_data = chl.effect_data;
+          chl.fxmem_retrig_count = effect_data & 0x0f;
+          int vol = chl.sample_volume;
+          effect_data >>= 4;
+          switch (effect_data)
           {
-            case  6: vol=(vol+vol)/3; break;
-            case  7: vol>>=1; break;
-            case 14: vol=(vol*3)/2; break;
-            case 15: vol+=vol; break;
+            case  6: vol = (vol + vol) / 3; break;
+            case  7: vol >>= 1;             break;
+            case 14: vol = (vol * 3) / 2;   break;
+            case 15: vol += vol;            break;
             default:
             {
-              uint8_t delta=2<<(effect_data&7);
-              vol+=effect_data&8?+delta:-delta;
-            }
+              const uint8_t delta = 2 << (effect_data & 7);
+              vol += (effect_data & 8) ? +delta : -delta;
+            } break;
           }
-          chl.sample_volume=vol<0?0:vol>255?255:vol;
-          chl.sample_pos=0;
-          chl.note_hit=1;
+          if (vol < 0)   vol = 0;
+          if (vol > 255) vol = 255;
+          chl.sample_volume = uint8_t(vol);
+          chl.sample_pos    = 0;
+          chl.note_hit      = 1;
         }
       } break;
 
-      case pmffx_subfx|(pmfsubfx_note_cut<<pmfcfg_num_effect_bits):
+      case pmffx_subfx | (pmfsubfx_note_cut << pmfcfg_num_effect_bits):
       {
-        // cut note after given number of ticks
-        if(!--chl.effect_data)
+        // Coupe la note après N ticks
+        if (!--chl.effect_data)
         {
-          chl.sample_speed=0;
-          chl.effect=0xff;
+          chl.sample_speed = 0;
+          chl.effect       = 0xff;
         }
       } break;
 
-      case pmffx_subfx|(pmfsubfx_note_delay<<pmfcfg_num_effect_bits):
+      case pmffx_subfx | (pmfsubfx_note_delay << pmfcfg_num_effect_bits):
       {
-        // hit note after given number of ticks
-        if(!--chl.effect_data)
+        // Déclenche la note après N ticks
+        if (!--chl.effect_data)
         {
           hit_note(chl, chl.fxmem_note_delay_idx, 0, true);
-          chl.effect=0xff;
+          chl.effect = 0xff;
         }
       } break;
 
       case pmffx_panning:
       {
-        uint8_t pan_spd=(chl.fxmem_panning_spd&pmffx_pansldtype_val_mask)*4;
-        chl.sample_panning=int8_t(chl.fxmem_panning_spd&pmffx_pansldtype_dir_mask?min(127, int(chl.sample_panning)+pan_spd):max(-127, int(chl.sample_panning)-pan_spd));
+        const uint8_t pan_spd =
+          (chl.fxmem_panning_spd & pmffx_pansldtype_val_mask) * 4;
+        const bool dir_right =
+          (chl.fxmem_panning_spd & pmffx_pansldtype_dir_mask) != 0;
+
+        int pan = chl.sample_panning;
+        pan = dir_right ? min(127, pan + int(pan_spd))
+                        : max(-127, pan - int(pan_spd));
+        chl.sample_panning = int8_t(pan);
       } break;
+
+      default:
+        break;
     }
   }
 }
-//----
 
-bool pmf_player::init_effect_volume_slide(audio_channel &chl_, uint8_t effect_data_)
+//============================================================================
+// Initialisation des effets (vol slide / note slide / vibrato)
+//============================================================================
+
+bool pmf_player::init_effect_volume_slide(audio_channel &chl, uint8_t effect_data)
 {
-  // check for volume slide data or read from effect memory
-  if(effect_data_&0xf)
-    chl_.fxmem_vol_slide_spd=effect_data_;
-  effect_data_=chl_.fxmem_vol_slide_spd;
+  // Si des données sont présentes, on met à jour la mémoire d’effet
+  if (effect_data & 0x0f)
+    chl.fxmem_vol_slide_spd = effect_data;
+  effect_data = chl.fxmem_vol_slide_spd;
 
-  if(effect_data_&pmffx_volsldtype_fine_mask)
+  if (effect_data & pmffx_volsldtype_fine_mask)
   {
-    // fine slide
-    uint8_t fx_type=effect_data_&pmffx_volsldtype_mask;
-    int8_t vdelta=(effect_data_&0xf)<<2;
-    int16_t v=int16_t(chl_.sample_volume)+(fx_type==pmffx_volsldtype_fine_down?-vdelta:vdelta);
-    chl_.sample_volume=v<0?0:v>255?255:v;
-    return false;
+    // Fine slide appliqué immédiatement
+    const uint8_t fx_type = effect_data & pmffx_volsldtype_mask;
+    const int8_t vdelta   = (effect_data & 0x0f) << 2;
+    int16_t v = int16_t(chl.sample_volume) +
+                (fx_type == pmffx_volsldtype_fine_down ? -vdelta : vdelta);
+    if (v < 0)   v = 0;
+    if (v > 255) v = 255;
+    chl.sample_volume = uint8_t(v);
+    return false; // rien à faire aux ticks suivants
   }
-  return true;
+  return true; // slide "normal" à appliquer sur les ticks
 }
-//----
 
-bool pmf_player::init_effect_note_slide(audio_channel &chl_, uint8_t slide_speed_, uint16_t target_note_period_)
+bool pmf_player::init_effect_note_slide(audio_channel &chl,
+                                        uint8_t slide_speed,
+                                        uint16_t target_note_period)
 {
-  // update note slide effect memory and check for regular note slide
-  if(slide_speed_)
-    chl_.fxmem_note_slide_spd=slide_speed_;
+  // Mémorise la vitesse de slide si fournie
+  if (slide_speed)
+    chl.fxmem_note_slide_spd = slide_speed;
   else
-    slide_speed_=chl_.fxmem_note_slide_spd;
-  if(target_note_period_)
-    chl_.fxmem_note_slide_prd=target_note_period_;
-  if(slide_speed_<0xe0)
+    slide_speed = chl.fxmem_note_slide_spd;
+
+  // Mémorise la cible si fournie
+  if (target_note_period)
+    chl.fxmem_note_slide_prd = target_note_period;
+
+  // Slide "normal" (non fine)
+  if (slide_speed < 0xe0)
     return true;
 
-  // apply fine/extra-fine note slide
-  if(!chl_.sample_speed)
+  // Fine / extra-fine slide appliqué immédiatement
+  if (!chl.sample_speed)
     return false;
-  int16_t note_period=chl_.note_period;
-  int16_t slide_spd=slide_speed_>=0xf0?(slide_speed_-0xf0)*4:(slide_speed_-0xe0);
-  if(note_period>target_note_period_)
-    slide_spd=-slide_spd;
-  note_period+=slide_spd;
-  if((slide_spd>0)^(note_period<target_note_period_))
-    note_period=target_note_period_;
-  chl_.note_period=note_period;
-  if(note_period<m_note_period_min || note_period>m_note_period_max)
-    chl_.sample_speed=0;
+
+  int16_t note_period = chl.note_period;
+  int16_t slide_spd   =
+    (slide_speed >= 0xf0) ? (slide_speed - 0xf0) * 4
+                          : (slide_speed - 0xe0);
+
+  if (note_period > target_note_period)
+    slide_spd = -slide_spd;
+
+  note_period += slide_spd;
+  if ( (slide_spd > 0) ^ (note_period < target_note_period) )
+    note_period = target_note_period;
+
+  chl.note_period = note_period;
+  if (note_period < m_note_period_min || note_period > m_note_period_max)
+    chl.sample_speed = 0;
+
   return false;
 }
-//----
 
-void pmf_player::init_effect_vibrato(audio_channel &chl_, uint8_t vibrato_depth_, uint8_t vibrato_speed_)
+void pmf_player::init_effect_vibrato(audio_channel &chl,
+                                     uint8_t vibrato_depth,
+                                     uint8_t vibrato_speed)
 {
-  // update vibrato attributes
-  if(vibrato_depth_)
-    chl_.fxmem_vibrato_depth=vibrato_depth_<<3;
-  if(vibrato_speed_)
-    chl_.fxmem_vibrato_spd=vibrato_speed_;
+  if (vibrato_depth)
+    chl.fxmem_vibrato_depth = vibrato_depth << 3;
+  if (vibrato_speed)
+    chl.fxmem_vibrato_spd = vibrato_speed;
 }
-//----
 
-void pmf_player::evaluate_envelope(envelope_state &env_, uint16_t env_data_offs_, bool is_note_off_)
+//============================================================================
+// Enveloppes
+//============================================================================
+
+void pmf_player::evaluate_envelope(envelope_state &env,
+                                   uint16_t env_data_offs,
+                                   bool is_note_off)
 {
-  // advance envelope (check if passes the current span end point)
-  const uint8_t *envelope=m_pmf_file+pgm_read_dword(m_pmf_file+pmfcfg_offset_env_data_offs)+env_data_offs_;
-  const uint8_t *env_span_data=envelope+pmfcfg_offset_env_points+env_.pos*pmfcfg_envelope_point_size;
-  uint16_t env_span_tick_end=pgm_read_word(env_span_data+pmfcfg_envelope_point_size+pmfcfg_offset_env_point_tick);
-  if(++env_.tick>=env_span_tick_end)
+  const uint8_t *envelope =
+    m_pmf_file + pgm_read_dword(m_pmf_file + pmfcfg_offset_env_data_offs)
+    + env_data_offs;
+
+  const uint8_t *env_span_data =
+    envelope + pmfcfg_offset_env_points + env.pos * pmfcfg_envelope_point_size;
+
+  uint16_t env_span_tick_end =
+    pgm_read_word(env_span_data + pmfcfg_envelope_point_size +
+                  pmfcfg_offset_env_point_tick);
+
+  // Avance le temps dans l’enveloppe
+  if (++env.tick >= env_span_tick_end)
   {
-    // get envelope start and end points (sustain/loop/none)
-    uint8_t env_pnt_start_idx, env_pnt_end_idx;
-    if(is_note_off_)
+    uint8_t env_pnt_start_idx;
+    uint8_t env_pnt_end_idx;
+
+    if (is_note_off)
     {
-      env_pnt_start_idx=pgm_read_byte(envelope+pmfcfg_offset_env_loop_start);
-      env_pnt_end_idx=pgm_read_byte(envelope+pmfcfg_offset_env_loop_end);
+      env_pnt_start_idx = pgm_read_byte(envelope + pmfcfg_offset_env_loop_start);
+      env_pnt_end_idx   = pgm_read_byte(envelope + pmfcfg_offset_env_loop_end);
     }
     else
     {
-      env_pnt_start_idx=pgm_read_byte(envelope+pmfcfg_offset_env_sustain_loop_start);
-      env_pnt_end_idx=pgm_read_byte(envelope+pmfcfg_offset_env_sustain_loop_end);
+      env_pnt_start_idx =
+        pgm_read_byte(envelope + pmfcfg_offset_env_sustain_loop_start);
+      env_pnt_end_idx   =
+        pgm_read_byte(envelope + pmfcfg_offset_env_sustain_loop_end);
     }
-    uint8_t env_last_pnt_idx=pgm_read_byte(envelope+pmfcfg_offset_env_num_points)-1;
-    env_pnt_start_idx=min(env_pnt_start_idx, env_last_pnt_idx);
-    env_pnt_end_idx=min(env_pnt_end_idx, env_last_pnt_idx);
 
-    // check for envelope end/loop-end
-    if(++env_.pos==env_pnt_end_idx)
+    const uint8_t env_last_pnt_idx =
+      pgm_read_byte(envelope + pmfcfg_offset_env_num_points) - 1;
+
+    env_pnt_start_idx = min(env_pnt_start_idx, env_last_pnt_idx);
+    env_pnt_end_idx   = min(env_pnt_end_idx,   env_last_pnt_idx);
+
+    // Fin de segment / boucle
+    if (++env.pos == env_pnt_end_idx)
     {
-      if(env_pnt_start_idx<env_pnt_end_idx)
-        env_.pos=env_pnt_start_idx;
+      if (env_pnt_start_idx < env_pnt_end_idx)
+        env.pos = env_pnt_start_idx;
       else
-        env_.pos=env_pnt_start_idx-1;
-      env_.tick=pgm_read_word(envelope+pmfcfg_offset_env_points+env_pnt_start_idx*pmfcfg_envelope_point_size+pmfcfg_offset_env_point_tick);
+        env.pos = env_pnt_start_idx - 1;
+
+      env.tick =
+        pgm_read_word(envelope + pmfcfg_offset_env_points +
+                      env_pnt_start_idx * pmfcfg_envelope_point_size +
+                      pmfcfg_offset_env_point_tick);
     }
-    env_span_data=envelope+pmfcfg_offset_env_points+env_.pos*pmfcfg_envelope_point_size;
+
+    env_span_data =
+      envelope + pmfcfg_offset_env_points + env.pos * pmfcfg_envelope_point_size;
+    env_span_tick_end =
+      pgm_read_word(env_span_data + pmfcfg_envelope_point_size +
+                    pmfcfg_offset_env_point_tick);
   }
 
-  // linearly interpolate the envelope value in current span
-  uint16_t env_span_tick_start=pgm_read_word(env_span_data+pmfcfg_offset_env_point_tick);
-  uint16_t env_span_val_start=pgm_read_word(env_span_data+pmfcfg_offset_env_point_val);
-  uint16_t env_span_val_end=pgm_read_word(env_span_data+pmfcfg_envelope_point_size+pmfcfg_offset_env_point_val);
-  float span_pos=float(env_.tick-env_span_tick_start)/float(env_span_tick_end-env_span_tick_start);
-  env_.value=env_span_val_start+int32_t(span_pos*(int32_t(env_span_val_end)-int32_t(env_span_val_start)));
+  // Interpolation linéaire entre deux points de l’enveloppe
+  const uint16_t env_span_tick_start =
+    pgm_read_word(env_span_data + pmfcfg_offset_env_point_tick);
+  const uint16_t env_span_val_start =
+    pgm_read_word(env_span_data + pmfcfg_offset_env_point_val);
+  const uint16_t env_span_val_end =
+    pgm_read_word(env_span_data + pmfcfg_envelope_point_size +
+                  pmfcfg_offset_env_point_val);
+
+  const float span_pos =
+    float(env.tick - env_span_tick_start) /
+    float(env_span_tick_end - env_span_tick_start);
+
+  env.value = env_span_val_start +
+              int32_t(span_pos *
+                      (int32_t(env_span_val_end) - int32_t(env_span_val_start)));
 }
-//----
+
+//------------------------------------------------
 
 void pmf_player::evaluate_envelopes()
 {
   // evaluate channel envelopes
   for(uint8_t ci=0; ci<m_num_playback_channels; ++ci)
   {
-    // evaluate volume and pitch envelopes
     audio_channel &chl=m_channels[ci];
+
+    // 🔒 Si aucun instrument n’a encore été assigné, on saute ce canal
+    if (!chl.inst_metadata)
+      continue;
+
     bool is_note_off=(chl.base_note_idx&0x80)!=0;
-    uint16_t vol_env_offset=pgm_read_word(chl.inst_metadata+pmfcfg_offset_inst_vol_env);
+	//==============================================================
+	// FIX: inst_metadata null-protection
+	//==============================================================
+	uint16_t vol_env_offset = 0xffff;   // sentinel = no envelope
+	if (chl.inst_metadata)              // avoid null pointer deref
+	{
+		vol_env_offset = pgm_read_word(
+			chl.inst_metadata + pmfcfg_offset_inst_vol_env
+		);
+	}
+
     if(vol_env_offset!=0xffff)
       evaluate_envelope(chl.vol_env, vol_env_offset, is_note_off);
-/*    uint16_t pitch_env_offset=pgm_read_word(chl.inst_metadata+pmfcfg_offset_inst_pitch_env);
-    if(pitch_env_offset!=0xffff)
-      evaluate_envelope(chl.pitch_env, pitch_env_offset, is_note_off);*/
+
+    // pitch env commenté chez toi, donc rien à changer ici
 
     if(is_note_off)
     {
-      // apply note fadeout
       chl.vol_env.value=(chl.vol_env.value>>8)*(chl.vol_fadeout>>8);
       uint16_t fadeout_speed=pgm_read_word(chl.inst_metadata+pmfcfg_offset_inst_fadeout_speed);
       chl.vol_fadeout=chl.vol_fadeout>fadeout_speed?chl.vol_fadeout-fadeout_speed:0;
     }
   }
 }
+
 //----------------------------------------------------------------------------
 
 uint16_t pmf_player::get_note_period(uint8_t note_idx_, int16_t finetune_)

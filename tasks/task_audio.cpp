@@ -56,8 +56,8 @@ extern "C" void task_audio(void*)
     while (true)
     {
         // Cadence stable pour le moteur PMF
-        vTaskDelay(pdMS_TO_TICKS(10)); // 100 Hz
-
+        vTaskDelay(pdMS_TO_TICKS(7)); 
+		
         // Mise à jour du mixage (PMF + SFX + WAV)
         baba::audio_update();
 
