@@ -18,28 +18,6 @@ idf_component_register(
         core/sprites.cpp
         core/persist.cpp
 
-        # --- Lib Gamebuino AKA (bas niveau) ---
-        lib/gb_ll_adc.c
-        lib/gb_ll_audio.c
-        lib/gb_ll_expander.c
-        lib/gb_ll_i2c.c
-        lib/gb_ll_lcd.c
-        lib/gb_ll_sdcard.c
-        lib/gb_ll_system.c
-
-        # --- Lib Gamebuino AKA (haut niveau) ---
-        lib/gb_core.cpp
-	lib/font8x8_basic.cpp
-        lib/gb_graphics.cpp
-        lib/gb_audio_player.cpp
-        lib/gb_audio_track_tone.cpp
-        lib/gb_audio_track_fx.cpp
-        lib/gb_audio_track_wav.cpp
-        lib/gb_audio_track_pmf.cpp
-
-        # --- PMF Player officiel ---
-        lib/pmf_player/pmf_player.cpp
-
         # --- Logique de jeu ---
         game/game.cpp
         game/levels_data.cpp
@@ -66,11 +44,12 @@ idf_component_register(
     INCLUDE_DIRS
         .
         core
-        lib
-        lib/pmf_player
         game
         tasks
         assets
         assets/gfx
         assets/music
+
+    REQUIRES
+	gamebuino
 )

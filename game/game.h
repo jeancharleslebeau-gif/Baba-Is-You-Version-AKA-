@@ -22,6 +22,7 @@
 */
 
 #pragma once
+#include "types.h"
 #include "core/grid.h"
 #include "core/rules.h"
 #include "music_map.h"

@@ -89,7 +89,7 @@ static Point find_you(const Grid& g, const PropertyTable& props) {
         for (int x = 0; x < g.width; ++x) {
             for (const auto& obj : g.cell(x, y).objects) {
                 const Properties& pr = props[(int)obj.type];
-                if (pr.isYou) {
+                if (pr.you) {
                     return {x, y};
                 }
             }
@@ -296,7 +296,7 @@ void game_draw() {
                 continue;
             }
 
-            draw_cell(screenX, screenY, g_state.grid.cell(x, y));
+            draw_cell(screenX, screenY, g_state.grid.cell(x, y), g_state.props);
         }
     }
 }

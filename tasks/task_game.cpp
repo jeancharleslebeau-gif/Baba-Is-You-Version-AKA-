@@ -19,6 +19,7 @@
     - Les entrées sont lues dans task_input.cpp et stockées dans g_keys.
     - Cette tâche tourne sur le core 1 (défini dans app_main.cpp).
     - Le moteur audio tourne dans task_audio (I2S + DMA + pool).
+    - g_time est utilisé par grid.cpp pour les effets WIN (feu d’artifice).
 ===============================================================================
 */
 
@@ -38,6 +39,11 @@
 
 namespace baba
 {
+
+// -----------------------------------------------------------------------------
+//  Temps global du moteur (utilisé par grid.cpp pour l’effet WIN)
+// -----------------------------------------------------------------------------
+float g_time = 0.0f;
 
 // -----------------------------------------------------------------------------
 //  Variables internes
@@ -111,8 +117,13 @@ void task_game(void *)
 
     while (true)
     {
+        // Cadence stable
         vTaskDelayUntil(&last_wake, frame_period);
 
+        // Avancement du temps global (≈ 0.025 s par frame)
+        g_time += 0.025f;
+
+        // Snapshot des entrées
         Keys k = g_keys;
 
         // Transition d’état
@@ -121,6 +132,8 @@ void task_game(void *)
             on_enter_mode(game_mode());
             s_prevMode = game_mode();
         }
+
+		printf("[Game] frame\n");
 
         switch (game_mode())
         {
@@ -137,6 +150,7 @@ void task_game(void *)
             uint32_t nowMs = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
             bool dirPressed = pressed_any_dir(k);
 
+            // Déplacement avec cooldown
             if (dirPressed)
             {
                 if (nowMs - s_lastMoveTimeMs >= MOVE_DELAY_MS)
@@ -146,6 +160,7 @@ void task_game(void *)
                 }
             }
 
+            // Conditions de victoire / mort
             if (game_state().hasWon)
             {
                 game_mode() = GameMode::Win;
@@ -157,6 +172,7 @@ void task_game(void *)
                 break;
             }
 
+            // Menu
             if (pressed_MENU(k))
             {
                 fade_out();
@@ -235,6 +251,7 @@ void task_game(void *)
             gfx_flush();
         }
 
+        // Sauvegarde des touches pour détection front montant
         s_prevKeys = k;
     }
 }

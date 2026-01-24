@@ -5,7 +5,7 @@
   Rôle :
     - Déclarer le tableau global contenant les pixels de l’atlas de sprites.
     - Format : RGB565 (16 bits par pixel).
-    - Dimensions : 256 × 32.
+    - Dimensions : 256 × 64 (4 lignes de 16 sprites 16×16).
 
   Notes :
     - La définition réelle est dans atlas.cpp.
@@ -19,5 +19,5 @@
 #pragma once
 #include <cstdint>
 
-// Tableau global des pixels de l’atlas de sprites (RGB565, 256×32)
-extern const uint16_t atlas_pixels[256 * 32];
+// Tableau global des pixels de l’atlas de sprites (RGB565, 256×64)
+extern const uint16_t atlas_pixels[256 * 64];

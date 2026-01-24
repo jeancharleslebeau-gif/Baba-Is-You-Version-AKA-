@@ -4,49 +4,60 @@
 -------------------------------------------------------------------------------
   Rôle :
     - Lire l’état brut des touches via l’expander.
-    - Détecter les pressions / relâchements.
-    - Mapper les bits vers des booléens lisibles (A, B, UP, MENU…).
+    - Détecter pressions / relâchements.
+    - Mapper les bits vers des booléens lisibles.
     - Lire les axes du joystick analogique.
-
-  Notes :
-    - Le module met à jour g_keys, accessible globalement.
-    - input_poll() doit être appelé à chaque frame.
-    - isLongPress() détecte une pression longue (~1 seconde).
+    - Fournir des helpers (long press).
 
   Auteur : Jean-Charles LEBEAU
   Date   : Janvier 2026
 ===============================================================================
 */
 
-#include "input.h"
+#include "core/input.h"
 #include "gb_core.h"
 
-// gb_core global défini dans app_main.cpp
+// gb_core global défini dans gb_core.cpp
 extern gb_core g_core;
 
+// État global des entrées
 Keys g_keys;
+
+// Dernier état brut (pour transitions)
 static uint16_t prev_raw = 0;
 
+// Compteurs pour pressions longues (un par bit)
+static int longPressCounter[16] = {};
+
+
+// -----------------------------------------------------------------------------
+// Initialisation
+// -----------------------------------------------------------------------------
 void input_init()
 {
     prev_raw = 0;
     g_keys = {};
+    for (int& c : longPressCounter)
+        c = 0;
 }
 
+
+// -----------------------------------------------------------------------------
+// Lecture des entrées (à appeler chaque frame)
+// -----------------------------------------------------------------------------
 void input_poll(Keys& k)
 {
-    // Lecture brute via lib AKA
-	g_core.buttons.update();
-
-    uint16_t raw = g_core.buttons.pressed() | g_core.buttons.state();
+    // 1) Lecture brute via lib AKA
+    g_core.buttons.update();
+    uint16_t raw = g_core.buttons.state() | g_core.buttons.pressed();
     k.raw = raw;
 
-    // Transitions
+    // 2) Transitions
     k.pressed  = raw & ~prev_raw;
     k.released = prev_raw & ~raw;
     prev_raw   = raw;
 
-    // Mapping boutons (adapté à tes besoins)
+    // 3) Mapping boutons
     k.up    = raw & GB_KEY_UP;
     k.down  = raw & GB_KEY_DOWN;
     k.left  = raw & GB_KEY_LEFT;
@@ -62,40 +73,44 @@ void input_poll(Keys& k)
     k.R1    = raw & GB_KEY_R1;
     k.L1    = raw & GB_KEY_L1;
 
-    // Joystick analogique
-    k.joxx = g_core.joystick.get_x();
+    // 4) Joystick analogique
+    k.joxx = g_core.joystick.get_x();  // [-2000, +2000]
     k.joxy = g_core.joystick.get_y();
 
-    // Joystick numérique (-1, 0, +1) avec seuils arbitraires
-    const int THRESH = 500;
-    if (k.joxx < -THRESH)       k.joyX = -1;
-    else if (k.joxx > THRESH)   k.joyX = +1;
-    else                        k.joyX = 0;
+    // 5) Joystick numérique
+    constexpr int THRESH = 500;
 
-    if (k.joxy < -THRESH)       k.joyY = -1;
-    else if (k.joxy > THRESH)   k.joyY = +1;
-    else                        k.joyY = 0;
+    k.joyX = (k.joxx < -THRESH) ? -1 :
+             (k.joxx >  THRESH) ? +1 : 0;
 
+    k.joyY = (k.joxy < -THRESH) ? -1 :
+             (k.joxy >  THRESH) ? +1 : 0;
+
+    // 6) Mise à jour globale
     g_keys = k;
 }
 
+
+// -----------------------------------------------------------------------------
+// Détection pression longue (~1 seconde à 60 FPS)
+// -----------------------------------------------------------------------------
 bool isLongPress(const Keys& k, int key)
 {
-    static int pressDuration = 0;
+    // Convertit le bit en index 0..15
+    int idx = __builtin_ctz(key);
 
     if (k.raw & key)
     {
-        pressDuration++;
-        if (pressDuration > 60) // ~1s à 60 FPS
+        if (++longPressCounter[idx] > 60)
         {
-            pressDuration = 0;
+            longPressCounter[idx] = 0;
             return true;
         }
     }
     else
     {
-        pressDuration = 0;
+        longPressCounter[idx] = 0;
     }
+
     return false;
 }
-

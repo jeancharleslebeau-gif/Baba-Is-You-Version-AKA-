@@ -1,17 +1,40 @@
-#include "graphics.h"
+/*
+====================================================================
+  graphics.cpp — Couche graphique BabaIsU sur Gamebuino AKA
+-------------------------------------------------------------------------------
+  Rôle :
+    - Fournir une API graphique simple et portable pour le moteur BabaIsU.
+    - Encapsuler les primitives bas niveau Gamebuino (LCD, DMA, backlight).
+    - Offrir des fonctions de dessin indépendantes du matériel :
+        * pixels
+        * lignes (Bresenham)
+        * rectangles pleins / contours
+        * cercles pleins / contours
+        * blit d’images RGB565
+        * texte 8×8 (font8x8_basic)
 
-// Lib AKA
+  Architecture :
+    - Utilise gb_graphics pour la gestion du backlight et du flush.
+    - Utilise gb_ll_lcd pour les primitives LCD (putpixel, clear, writeWindow).
+    - Ne dépend d’aucune logique de jeu : purement graphique.
+
+  Notes :
+    - Le LCD est initialisé par gb_core::init() avant l’appel à gfx_init().
+    - gfx_present() et gfx_flush() sont synonymes (mise à jour immédiate).
+    - Toutes les fonctions sont dans namespace baba pour éviter les collisions.
+====================================================================
+*/
+
+#include "core/graphics.h"
 #include "gb_graphics.h"
-#include "gb_common.h"
 #include "gb_ll_lcd.h"
-#include "..\lib\font8x8_basic.h"   // font8x8_basic[128][8] (uint8_t)
+#include "font8x8_basic.h"
 
-// Namespace moteur
 namespace baba {
 
-// ============================================================================
+// ====================================================================
 //  Objet graphique AKA global
-// ============================================================================
+// ====================================================================
 static gb_graphics g_gfx;
 
 
@@ -26,9 +49,9 @@ void gfx_init()
 }
 
 
-// ============================================================================
+// ====================================================================
 //  Effacement / présentation
-// ============================================================================
+// ====================================================================
 void gfx_clear(Color color)
 {
     lcd_clear(color);
@@ -54,24 +77,19 @@ void gfx_putpixel(int x, int y, Color color)
 }
 
 
-// ============================================================================
-//  Rectangle plein
-// ============================================================================
+// ====================================================================
+//  Rectangle plein (version B : via gb_graphics)
+// ====================================================================
 void gfx_fillRect(int x, int y, int w, int h, Color color)
 {
-    for (int iy = 0; iy < h; ++iy)
-    {
-        for (int ix = 0; ix < w; ++ix)
-        {
-            lcd_putpixel(x + ix, y + iy, color);
-        }
-    }
+    g_gfx.setColor(color);
+    g_gfx.fillRect(x, y, w, h);
 }
 
 
-// ============================================================================
+// ====================================================================
 //  Rectangle vide (contour)
-// ============================================================================
+// ====================================================================
 void gfx_drawRect(int x, int y, int w, int h, Color color)
 {
     // Haut / bas
@@ -90,9 +108,9 @@ void gfx_drawRect(int x, int y, int w, int h, Color color)
 }
 
 
-// ============================================================================
+// ====================================================================
 //  Ligne (Bresenham)
-// ============================================================================
+// ====================================================================
 void gfx_drawLine(int x0, int y0, int x1, int y1, Color color)
 {
     int dx = (x1 > x0) ? (x1 - x0) : (x0 - x1);
@@ -123,9 +141,9 @@ void gfx_drawLine(int x0, int y0, int x1, int y1, Color color)
 }
 
 
-// ============================================================================
+// ====================================================================
 //  Cercle vide (Midpoint circle algorithm)
-// ============================================================================
+// ====================================================================
 void gfx_drawCircle(int cx, int cy, int r, Color color)
 {
     int x = r;
@@ -157,9 +175,9 @@ void gfx_drawCircle(int cx, int cy, int r, Color color)
 }
 
 
-// ============================================================================
+// ====================================================================
 //  Cercle plein
-// ============================================================================
+// ====================================================================
 void gfx_fillCircle(int cx, int cy, int r, Color color)
 {
     int x = r;
@@ -194,10 +212,9 @@ void gfx_fillCircle(int cx, int cy, int r, Color color)
 }
 
 
-// ============================================================================
+// ====================================================================
 //  Blit d’un bitmap arbitraire (pixels 16 bits RGB565)
-//  - utilisé pour les images “pleines” (titre, écrans fixes, etc.)
-// ============================================================================
+// ====================================================================
 void gfx_blit(const uint16_t* pixels, int w, int h, int x, int y)
 {
     for (int iy = 0; iy < h; ++iy)
@@ -214,13 +231,9 @@ void gfx_blit(const uint16_t* pixels, int w, int h, int x, int y)
 }
 
 
-// ============================================================================
+// ====================================================================
 //  Blit d’une région rectangulaire dans un atlas 16 bits (RGB565)
-//  - atlas = image brute (ex: 256×32) rangée ligne par ligne
-//  - srcX, srcY, srcW, srcH = rectangle source dans l’atlas
-//  - dstX, dstY = position de destination à l’écran
-//  - implémentation “DMA-friendly” : une ligne source = bloc contigu
-// ============================================================================
+// ====================================================================
 void gfx_blitRegion(
     const uint16_t* atlas,
     int atlasW,
@@ -231,12 +244,9 @@ void gfx_blitRegion(
 {
     for (int y = 0; y < srcH; ++y)
     {
-        // Pointeur sur le début de la ligne source dans l’atlas
         const uint16_t* srcLine = atlas + (srcY + y) * atlasW + srcX;
         int dy = dstY + y;
 
-        // Version CPU simple : pixel par pixel
-        // (remplaçable facilement par un appel DMA ligne par ligne)
         for (int x = 0; x < srcW; ++x)
         {
             int dx = dstX + x;
@@ -245,33 +255,10 @@ void gfx_blitRegion(
     }
 }
 
-/*
-    Variante DMA (à brancher plus tard) :
 
-    void gfx_blitRegion(
-        const uint16_t* atlas,
-        int atlasW,
-        int srcX, int srcY,
-        int srcW, int srcH,
-        int dstX, int dstY
-    )
-    {
-        lcd_startWriteWindow(dstX, dstY, srcW, srcH);
-
-        for (int y = 0; y < srcH; ++y)
-        {
-            const uint16_t* srcLine = atlas + (srcY + y) * atlasW + srcX;
-            lcd_writePixels(srcLine, srcW); // transfert DMA idéal
-        }
-
-        lcd_endWriteWindow();
-    }
-*/
-
-
-// ============================================================================
+// ====================================================================
 //  Texte (font8x8)
-// ============================================================================
+// ====================================================================
 void gfx_text(int x, int y, const char* text, Color color)
 {
     int px = x;
@@ -294,7 +281,7 @@ void gfx_text(int x, int y, const char* text, Color color)
             }
         }
 
-        px += 8; // avance d’un caractère
+        px += 8;
     }
 }
 
@@ -309,9 +296,9 @@ void gfx_text_center(int y, const char* text, Color color)
 }
 
 
-// ============================================================================
+// ====================================================================
 //  Dimensions écran
-// ============================================================================
+// ====================================================================
 int gfx_width()
 {
     return SCREEN_WIDTH;
