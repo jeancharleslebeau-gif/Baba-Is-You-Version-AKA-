@@ -1,6 +1,3 @@
-#pragma once
-#include "core/input.h"
-
 /*
 ============================================================
   task_input.h — Tâche input (100 Hz)
@@ -13,6 +10,9 @@ ce qui garantit une excellente réactivité même si le jeu tourne
 à 60 FPS.
 ============================================================
 */
+
+#pragma once
+#include "core/input.h"
 
 namespace baba {
 

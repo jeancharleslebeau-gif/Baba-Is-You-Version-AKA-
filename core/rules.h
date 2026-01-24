@@ -10,33 +10,11 @@
 */
 
 #pragma once
-#include "grid.h"
 #include <array>
+#include "types.h"
+#include "grid.h"
 
 namespace baba {
-
-// -----------------------------------------------------------------------------
-//  Ensemble de propriétés pour un type d’objet
-// -----------------------------------------------------------------------------
-struct Properties {
-    bool isYou   = false;
-    bool isPush  = false;
-    bool isStop  = false;
-    bool isWin   = false;
-    bool isSink  = false;
-    bool isKill  = false;
-    bool isHot   = false;
-    bool isMelt  = false;
-    bool isMove  = false;
-    bool isOpen  = false;
-    bool isShut  = false;
-    bool isFloat = false;
-};
-
-// -----------------------------------------------------------------------------
-//  Table complète : une entrée par ObjectType
-// -----------------------------------------------------------------------------
-using PropertyTable = std::array<Properties, (int)ObjectType::Count>;
 
 // -----------------------------------------------------------------------------
 //  Fonctions exposées par rules.cpp

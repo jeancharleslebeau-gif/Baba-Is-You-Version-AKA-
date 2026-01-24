@@ -48,7 +48,7 @@ extern "C" void task_audio(void*)
     /*
     ---------------------------------------------------------------------------
       Boucle principale audio
-      - Cadence fixe : 100 Hz (10 ms)
+      - Cadence fixe : 
       - Mise à jour du moteur PMF
       - Traitement des commandes de musique
     ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ extern "C" void task_audio(void*)
     while (true)
     {
         // Cadence stable pour le moteur PMF
-        vTaskDelay(pdMS_TO_TICKS(7)); 
+        vTaskDelay(pdMS_TO_TICKS(18)); // 55 Hz
 		
         // Mise à jour du mixage (PMF + SFX + WAV)
         baba::audio_update();

@@ -23,6 +23,7 @@
 */
 
 #pragma once
+#include "types.h"
 #include "grid.h"
 #include "rules.h"
 
@@ -50,12 +51,12 @@ struct MoveResult {
     - Utilisés par movement.cpp et potentiellement ailleurs.
 ===============================================================================
 */
-inline bool isYou(const Properties& p)   { return p.isYou; }
-inline bool isPush(const Properties& p)  { return p.isPush; }
-inline bool isStop(const Properties& p)  { return p.isStop; }
-inline bool isWin(const Properties& p)   { return p.isWin; }
-inline bool isSink(const Properties& p)  { return p.isSink; }
-inline bool isKill(const Properties& p)  { return p.isKill; }
+inline bool isYou(const Properties& p)   { return p.you; }
+inline bool isPush(const Properties& p)  { return p.push; }
+inline bool isStop(const Properties& p)  { return p.stop; }
+inline bool isWin(const Properties& p)   { return p.win; }
+inline bool isSink(const Properties& p)  { return p.sink; }
+inline bool isKill(const Properties& p)  { return p.kill; }
 
 /*
 ===============================================================================

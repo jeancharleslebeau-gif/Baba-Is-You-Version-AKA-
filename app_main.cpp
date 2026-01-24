@@ -63,7 +63,8 @@
 #include "tasks/task_input.h"
 #include "tasks/task_audio.h"
 
-static gb_core g_core;
+extern gb_core g_core;
+
 
 void hardware_init()
 {
@@ -84,10 +85,10 @@ void hardware_init()
     g_core.init();
 
     // ------------------------------------------------------------
-    // 2) Audio haut-niveau BabaIsU (wrap lib AKA)
+    // 2) Audio haut-niveau BabaIsU (wrap lib AKA) remplacé par l'init dans la tâche
     // ------------------------------------------------------------
-    printf("[HW] baba::audio_init()...\n");
-    baba::audio_init();
+    // printf("[HW] baba::audio_init()...\n");
+    // baba::audio_init();
 
     // ------------------------------------------------------------
     // 3) Graphics haut-niveau BabaIsU (wrap gb_graphics / LCD)

@@ -1,16 +1,11 @@
 /*
 ===============================================================================
-  music_map.h — Table de correspondance niveaux → musiques
+  music_map.h — Table indexée niveaux → musiques (0 → 39)
 -------------------------------------------------------------------------------
   Rôle :
-    - Définir un identifiant pour chaque musique disponible
-    - Associer chaque niveau à une musique
-    - Fournir une fonction utilitaire pour récupérer la musique d’un niveau
-
-  Notes :
-    - Ajoutez simplement une entrée dans levelMusicMap pour assigner une musique
-      à un niveau existant ou futur.
-    - Les musiques sont déclarées dans assets/music/(*).h
+    - Associer chaque niveau à une musique via un tableau indexé
+    - Lookup O(1), aucune boucle, aucune ambiguïté
+    - Compatible avec levels_count() = 40
 ===============================================================================
 */
 
@@ -34,40 +29,63 @@ enum class MusicID {
     NONE
 };
 
-struct LevelMusic {
-    int level;
-    MusicID music;
+// -----------------------------------------------------------------------------
+//  Tableau indexé : musicForLevel[level] → MusicID
+//  40 niveaux (0 → 39), conforme à levels_count() = 40
+// -----------------------------------------------------------------------------
+static const MusicID musicForLevel[40] = {
+    /*  0 */ MusicID::BABA_SAMBA,
+    /*  1 */ MusicID::BABA_MUSIC_2,
+    /*  2 */ MusicID::BABA_CAVE,
+    /*  3 */ MusicID::CRYSTAL,
+    /*  4 */ MusicID::MISTHART,
+    /*  5 */ MusicID::WF_DRAGO,
+    /*  6 */ MusicID::WF_MAGES,
+    /*  7 */ MusicID::BABA_SAMBA,
+    /*  8 */ MusicID::BABA_MUSIC_2,
+    /*  9 */ MusicID::BABA_CAVE,
+
+    /* 10 */ MusicID::CRYSTAL,
+    /* 11 */ MusicID::MISTHART,
+    /* 12 */ MusicID::WF_DRAGO,
+    /* 13 */ MusicID::WF_MAGES,
+    /* 14 */ MusicID::BABA_SAMBA,
+    /* 15 */ MusicID::BABA_MUSIC_2,
+    /* 16 */ MusicID::BABA_CAVE,
+    /* 17 */ MusicID::CRYSTAL,
+    /* 18 */ MusicID::MISTHART,
+    /* 19 */ MusicID::WF_DRAGO,
+
+    /* 20 */ MusicID::WF_MAGES,
+    /* 21 */ MusicID::BABA_SAMBA,
+    /* 22 */ MusicID::BABA_CAVE,
+    /* 23 */ MusicID::CRYSTAL,
+    /* 24 */ MusicID::MISTHART,
+    /* 25 */ MusicID::WF_DRAGO,
+    /* 26 */ MusicID::WF_MAGES,
+    /* 27 */ MusicID::BABA_SAMBA,
+    /* 28 */ MusicID::BABA_MUSIC_2,
+    /* 29 */ MusicID::BABA_CAVE,
+
+    /* 30 */ MusicID::CRYSTAL,
+    /* 31 */ MusicID::MISTHART,
+    /* 32 */ MusicID::WF_DRAGO,
+    /* 33 */ MusicID::WF_MAGES,
+    /* 34 */ MusicID::BABA_SAMBA,
+    /* 35 */ MusicID::BABA_MUSIC_2,
+    /* 36 */ MusicID::BABA_CAVE,
+    /* 37 */ MusicID::CRYSTAL,
+    /* 38 */ MusicID::MISTHART,
+    /* 39 */ MusicID::WF_DRAGO
 };
 
-// Tableau extensible : tu peux modifier ou ajouter des lignes librement
-static const LevelMusic levelMusicMap[] = {
-    { 0, MusicID::BABA_SAMBA },
-    { 1, MusicID::BABA_MUSIC_2 },
-    { 2, MusicID::BABA_CAVE },
-    { 3, MusicID::CRYSTAL },
-    { 4, MusicID::MISTHART },
-    { 5, MusicID::WF_DRAGO },
-    { 6, MusicID::WF_MAGES },
-    { 7, MusicID::BABA_SAMBA },
-    { 8, MusicID::BABA_MUSIC_2 },
-    { 9, MusicID::BABA_CAVE },
-    { 10, MusicID::CRYSTAL },
-    { 11, MusicID::MISTHART },
-    { 12, MusicID::WF_DRAGO },
-    { 13, MusicID::WF_MAGES },
-    { 14, MusicID::BABA_SAMBA },
-    { 15, MusicID::BABA_MUSIC_2 },
-    { 16, MusicID::BABA_CAVE },
-    { 17, MusicID::CRYSTAL },
-    { 18, MusicID::MISTHART },
-    { 19, MusicID::WF_DRAGO },
-    { 20, MusicID::WF_MAGES },
-};
-
+// -----------------------------------------------------------------------------
+//  Récupération directe : O(1)
+// -----------------------------------------------------------------------------
 inline MusicID getMusicForLevel(int level)
 {
-    for (auto& lm : levelMusicMap)
-        if (lm.level == level)
-            return lm.music;
-    return MusicID::NONE;
+    if (level < 0 || level >= 40)
+        return MusicID::NONE;
+
+    return musicForLevel[level];
 }

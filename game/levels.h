@@ -2,18 +2,6 @@
 ===============================================================================
   levels.h — Déclarations des niveaux
 -------------------------------------------------------------------------------
-  Rôle :
-    - Définir les constantes de dimensions de la carte.
-    - Déclarer les tableaux de niveaux (extern).
-    - Fournir un accès générique via levels[] et levels_count().
-    - Utilisé par load_level() dans levels.cpp pour remplir la Grid.
-
-  Notes :
-    - Chaque niveau est codé en dur sous forme de tableau uint8_t.
-    - Les valeurs proviennent de defines.h (EMPTY, BABA, FLAG, W_BABA, W_IS…).
-    - MAP_WIDTH × MAP_HEIGHT = META_FULL_SIZE.
-    - Évolution possible : chargement dynamique depuis fichiers externes.
-===============================================================================
 */
 
 #pragma once
@@ -23,9 +11,8 @@
 namespace baba {
 
 // -----------------------------------------------------------------------------
-// Dimensions de la carte
+// Dimensions META (uniquement pour les 21 premiers niveaux)
 // -----------------------------------------------------------------------------
-// Dimensions des niveaux META
 constexpr int META_WIDTH     = 13;
 constexpr int META_HEIGHT    = 10;
 constexpr int META_FULL_SIZE = META_WIDTH * META_HEIGHT;
@@ -35,15 +22,16 @@ constexpr int META_FULL_SIZE = META_WIDTH * META_HEIGHT;
 // Structure LevelInfo : associe données et dimensions 
 // -----------------------------------------------------------------------------
 struct LevelInfo {
-    const uint8_t* data;   // tableau brut du niveau
-    int width;             // largeur propre au niveau
-    int height;            // hauteur propre au niveau
+    const uint8_t* data;
+    int width;
+    int height;
 };
 
 
 // -----------------------------------------------------------------------------
 // Déclarations des niveaux (définis dans levels.cpp)
 // -----------------------------------------------------------------------------
+// Niveaux META (fixes 13×10)
 extern const uint8_t level1[META_FULL_SIZE];
 extern const uint8_t level2[META_FULL_SIZE];
 extern const uint8_t level3[META_FULL_SIZE];
@@ -66,11 +54,29 @@ extern const uint8_t level19[META_FULL_SIZE];
 extern const uint8_t level20[META_FULL_SIZE];
 extern const uint8_t level21[META_FULL_SIZE];
 
-// Placeholders pour extension
-extern const uint8_t level22[META_FULL_SIZE];
-extern const uint8_t level23[META_FULL_SIZE];
-extern const uint8_t level24[META_FULL_SIZE];
-extern const uint8_t level25[META_FULL_SIZE];
+// -----------------------------------------------------------------------------
+// Niveaux 22 → 40 (tailles variables)
+// -----------------------------------------------------------------------------
+extern const uint8_t level22[];
+extern const uint8_t level23[];
+extern const uint8_t level24[];
+extern const uint8_t level25[];
+extern const uint8_t level26[];
+extern const uint8_t level27[];
+extern const uint8_t level28[];
+extern const uint8_t level29[];
+extern const uint8_t level30[];
+extern const uint8_t level31[];
+extern const uint8_t level32[];
+extern const uint8_t level33[];
+extern const uint8_t level34[];
+extern const uint8_t level35[];
+extern const uint8_t level36[];
+extern const uint8_t level37[];
+extern const uint8_t level38[];
+extern const uint8_t level39[];
+extern const uint8_t level40[];
+
 
 // -----------------------------------------------------------------------------
 // Tableau global des niveaux
@@ -81,14 +87,10 @@ extern const LevelInfo levels[];
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
-
-// Nombre de niveaux disponibles
 inline int levels_count() {
-    // ⚠️ À mettre à jour si tu ajoutes/retires des niveaux
-    return 21; 
+    return 40;
 }
 
-// Charge un niveau dans une Grid
 void load_level(int index, Grid& g);
 
 } // namespace baba

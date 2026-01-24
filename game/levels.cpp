@@ -18,6 +18,7 @@
 #include "levels.h"
 #include "defines.h"
 #include "core/grid.h"
+#include "core/types.h"
 
 namespace baba {
 

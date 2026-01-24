@@ -8,12 +8,12 @@
     - Dessiner une cellule via gfx_blitRegion().
 
   Notes :
-    - L’atlas utilisé fait 256×32 px (16 colonnes × 2 lignes).
+    - Atlas recommandé : 256×64 px (16 colonnes × 4 lignes).
     - Chaque sprite fait 16×16 px.
-    - Les indices ci-dessous correspondent à l’atlas minimal blanc.
-
-  Auteur : Jean-Charles LEBEAU
-  Date   : Janvier 2026
+    - Ligne 0 : objets physiques
+    - Ligne 1 : TEXT_* (noms)
+    - Ligne 2 : TEXT_* (propriétés)
+    - Ligne 3 : réserve future
 ===============================================================================
 */
 
@@ -30,8 +30,10 @@ namespace baba {
 static constexpr int ATLAS_TILE_W = 16;
 static constexpr int ATLAS_TILE_H = 16;
 static constexpr int ATLAS_COLS   = 16;
+
+// ⚠️ Atlas étendu : 4 lignes (64 px)
 static constexpr int ATLAS_WIDTH  = 256;
-static constexpr int ATLAS_HEIGHT = 32;
+static constexpr int ATLAS_HEIGHT = 64;
 
 // -----------------------------------------------------------------------------
 //  Accès aux pixels de l’atlas
@@ -51,24 +53,31 @@ static uint16_t g_spriteIndex[(size_t)ObjectType::Count];
 // -----------------------------------------------------------------------------
 void sprites_init()
 {
-    // Valeur par défaut : EMPTY (index 7)
+    // Valeur par défaut : EMPTY
     for (size_t i = 0; i < (size_t)ObjectType::Count; i++)
         g_spriteIndex[i] = 7;
 
     // -------------------------------------------------------------------------
-    // Ligne 0 : objets
+    // Ligne 0 : objets physiques
     // -------------------------------------------------------------------------
-    g_spriteIndex[(size_t)ObjectType::Baba] = 0;
-    g_spriteIndex[(size_t)ObjectType::Wall] = 1;
-    g_spriteIndex[(size_t)ObjectType::Rock] = 2;
-    g_spriteIndex[(size_t)ObjectType::Flag] = 3;
-    g_spriteIndex[(size_t)ObjectType::Lava] = 4;
-    g_spriteIndex[(size_t)ObjectType::Goop] = 5;
-    g_spriteIndex[(size_t)ObjectType::Love] = 6;
+    g_spriteIndex[(size_t)ObjectType::Baba]  = 0;
+    g_spriteIndex[(size_t)ObjectType::Wall]  = 1;
+    g_spriteIndex[(size_t)ObjectType::Rock]  = 2;
+    g_spriteIndex[(size_t)ObjectType::Flag]  = 3;
+    g_spriteIndex[(size_t)ObjectType::Lava]  = 4;
+    g_spriteIndex[(size_t)ObjectType::Goop]  = 5;
+    g_spriteIndex[(size_t)ObjectType::Love]  = 6;
     g_spriteIndex[(size_t)ObjectType::Empty] = 7;
 
+    // Nouveaux objets
+    g_spriteIndex[(size_t)ObjectType::Key]   = 8;
+    g_spriteIndex[(size_t)ObjectType::Door]  = 9;
+    g_spriteIndex[(size_t)ObjectType::Water] = 10;
+    g_spriteIndex[(size_t)ObjectType::Ice]   = 11;
+    g_spriteIndex[(size_t)ObjectType::Box]   = 12;
+
     // -------------------------------------------------------------------------
-    // Ligne 1 : mots
+    // Ligne 1 : TEXT_* (noms)
     // -------------------------------------------------------------------------
     g_spriteIndex[(size_t)ObjectType::Text_Baba]  = 16;
     g_spriteIndex[(size_t)ObjectType::Text_Wall]  = 17;
@@ -79,14 +88,33 @@ void sprites_init()
     g_spriteIndex[(size_t)ObjectType::Text_Love]  = 22;
     g_spriteIndex[(size_t)ObjectType::Text_Empty] = 23;
 
-    g_spriteIndex[(size_t)ObjectType::Text_Is]    = 24;
-    g_spriteIndex[(size_t)ObjectType::Text_Push]  = 25;
-    g_spriteIndex[(size_t)ObjectType::Text_Stop]  = 26;
-    g_spriteIndex[(size_t)ObjectType::Text_Win]   = 27;
-    g_spriteIndex[(size_t)ObjectType::Text_You]   = 28;
-    g_spriteIndex[(size_t)ObjectType::Text_Sink]  = 29;
-    g_spriteIndex[(size_t)ObjectType::Text_Kill]  = 30;
-    g_spriteIndex[(size_t)ObjectType::Text_Swap]  = 31;
+    g_spriteIndex[(size_t)ObjectType::Text_Key]   = 24;
+    g_spriteIndex[(size_t)ObjectType::Text_Door]  = 25;
+    g_spriteIndex[(size_t)ObjectType::Text_Water] = 26;
+    g_spriteIndex[(size_t)ObjectType::Text_Ice]   = 27;
+    g_spriteIndex[(size_t)ObjectType::Text_Box]   = 28;
+
+    // -------------------------------------------------------------------------
+    // Ligne 2 : TEXT_* (propriétés)
+    // -------------------------------------------------------------------------
+    g_spriteIndex[(size_t)ObjectType::Text_Is]    = 32;
+    g_spriteIndex[(size_t)ObjectType::Text_Push]  = 33;
+    g_spriteIndex[(size_t)ObjectType::Text_Stop]  = 34;
+    g_spriteIndex[(size_t)ObjectType::Text_Win]   = 35;
+    g_spriteIndex[(size_t)ObjectType::Text_You]   = 36;
+    g_spriteIndex[(size_t)ObjectType::Text_Sink]  = 37;
+    g_spriteIndex[(size_t)ObjectType::Text_Kill]  = 38;
+    g_spriteIndex[(size_t)ObjectType::Text_Swap]  = 39;
+
+    g_spriteIndex[(size_t)ObjectType::Text_Hot]   = 40;
+    g_spriteIndex[(size_t)ObjectType::Text_Melt]  = 41;
+    g_spriteIndex[(size_t)ObjectType::Text_Move]  = 42;
+    g_spriteIndex[(size_t)ObjectType::Text_Open]  = 43;
+    g_spriteIndex[(size_t)ObjectType::Text_Shut]  = 44;
+    g_spriteIndex[(size_t)ObjectType::Text_Float] = 45;
+    g_spriteIndex[(size_t)ObjectType::Text_Pull]  = 46;
+
+    // Ligne 3 : libre pour extensions futures
 }
 
 // -----------------------------------------------------------------------------
@@ -107,7 +135,7 @@ SpriteRect sprite_rect_for(ObjectType t)
 }
 
 // -----------------------------------------------------------------------------
-//  Dessine une cellule à l’écran
+//  Dessine un sprite à l’écran
 // -----------------------------------------------------------------------------
 void draw_sprite(int x, int y, ObjectType t)
 {
@@ -118,10 +146,9 @@ void draw_sprite(int x, int y, ObjectType t)
 
     SpriteRect r = sprite_rect_for(t);
 
-    // Nouvelle version : blit rectangulaire générique
     gfx_blitRegion(
         getAtlasPixels(),
-        ATLAS_WIDTH,   // stride réel de l’atlas (256 px)
+        ATLAS_WIDTH,
         r.x, r.y,
         r.w, r.h,
         x, y
