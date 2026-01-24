@@ -1,0 +1,6 @@
+# Partition table custom pour Baba Is You (ESP32‑S3, 8 Mo)
+
+nvs,      data, nvs,     0x9000,   0x6000
+otadata,  data, ota,     0xF000,   0x2000
+factory,  app,  factory, 0x20000,  0x400000
+storage,  data, fat,     0x420000, 0x3E0000
