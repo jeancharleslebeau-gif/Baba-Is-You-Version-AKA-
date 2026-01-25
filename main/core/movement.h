@@ -76,6 +76,6 @@ inline bool isKill(const Properties& p)  { return p.kill; }
     - MoveResult indiquant victoire ou mort.
 ===============================================================================
 */
-MoveResult step(Grid& grid, const PropertyTable& props, int dx, int dy);
+MoveResult step(Grid& grid, const PropertyTable& props, const TransformSetTable& transforms, int dx, int dy);
 
 } // namespace baba

@@ -6,12 +6,13 @@
     - Définir la structure GameState, qui contient l’état complet du jeu :
         * la grille (Grid)
         * les propriétés dynamiques (PropertyTable)
+        * les transformations d’objets (TransformTable)
         * les flags de victoire / mort
     - Déclarer les fonctions principales du moteur de jeu :
-        * game_init()      → initialisation globale
-        * game_load_level()→ chargement d’un niveau
-        * game_update()    → logique par frame
-        * game_draw()      → rendu graphique
+        * game_init()       → initialisation globale
+        * game_load_level() → chargement d’un niveau + analyse des règles
+        * game_update()     → logique par frame (déplacements + règles)
+        * game_draw()       → rendu graphique
     - Déclarer les fonctions de gestion d’état (mode, transitions).
     - Servir d’interface entre la boucle principale (app_main)
       et le moteur logique BabaIsU.
@@ -27,7 +28,6 @@
 #include "core/rules.h"
 #include "music_map.h"
 
-
 namespace baba {
 
 MusicID game_get_forced_music();
@@ -39,11 +39,12 @@ void    game_set_forced_music(MusicID id, bool persistAcrossLevels);
 ===============================================================================
 */
 struct GameState {
-    Grid grid;                // Grille de jeu (objets et mots)
-    PropertyTable props;      // Propriétés dynamiques (YOU, PUSH, STOP, etc.)
-    bool hasWon  = false;     // Flag de victoire
-    bool hasDied = false;     // Flag de mort
-	int currentLevel = 0; 	  // Niveau courant (pour restart/advance)
+    Grid grid;                    // Grille de jeu (objets et mots)
+    PropertyTable props;          // Propriétés dynamiques (YOU, PUSH, STOP, HOT…)
+    TransformSetTable transforms; // Transformations d’objets (ROCK→WALL, EMPTY→ROCK…)
+    bool hasWon  = false;         // Flag de victoire
+    bool hasDied = false;         // Flag de mort
+    int currentLevel = 0;         // Niveau courant (pour restart/advance)
 };
 
 /*
@@ -68,7 +69,7 @@ enum class GameMode {
 // Initialise l’état global du jeu et charge le premier niveau
 void game_init();
 
-// Charge un niveau par index et recalcule les propriétés
+// Charge un niveau par index et recalcule les propriétés + transformations
 void game_load_level(int index);
 
 // Met à jour la logique du jeu (déplacements, règles, états)
@@ -91,7 +92,7 @@ void fade_in(int delayMs = 30, int steps = 10);
 void fade_out(int delayMs = 30, int steps = 10);
 
 // Helpers de progression 
-void game_win_continue(); 			// avance au niveau suivant 
-void game_restart_after_death(); 	// relance le niveau courant
+void game_win_continue();        // avance au niveau suivant 
+void game_restart_after_death(); // relance le niveau courant
 
 } // namespace baba

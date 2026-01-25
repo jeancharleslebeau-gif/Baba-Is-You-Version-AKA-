@@ -1,36 +1,53 @@
 /*
 ===============================================================================
-  movement.cpp — Moteur de déplacement consolidé (version propre)
+  movement.cpp — Moteur de déplacement consolidé (version avec SWAP + transfos)
 -------------------------------------------------------------------------------
-  Gère :
-    - YOU (déplacement joueur)
-    - PUSH (chaînes)
-    - STOP (blocage)
-    - PULL (tirer)
-    - MOVE (déplacement automatique)
-    - FLOATING (couches séparées)
-    - HOT/MELT
-    - OPEN/SHUT
-    - SINK/KILL
-    - WIN
+  Rôle :
+    - Appliquer la logique de déplacement et d’interaction sur la grille :
+        * MOVE (déplacement automatique)
+        * YOU (déplacement joueur)
+        * PUSH (chaînes d’objets)
+        * PULL (tirer des objets)
+        * STOP (blocage)
+        * SWAP (échange de position)
+        * FLOAT (couches séparées)
+        * HOT/MELT
+        * OPEN/SHUT
+        * SINK/KILL
+        * WIN
+    - Appliquer les transformations d’objets AVANT les déplacements :
+        * TransformSetTable permet :
+            - transformations multiples (ROCK→WALL + ROCK→FLAG)
+            - chaînes (ROCK→WALL→FLAG)
+            - cycles gérés dans rules.cpp (A→B→C→A)
 
   Philosophie :
-    - Toutes les interactions sont séparées par couche FLOATING.
+    - Les transformations sont appliquées en premier (apply_transformations).
     - MOVE est appliqué avant YOU.
-    - PUSH est atomique.
-    - Les effets post-mouvement sont appliqués après tous les déplacements.
+    - PUSH est atomique (chaîne complète ou rien).
+    - SWAP est traité avant STOP/PUSH sur la même couche FLOAT.
+    - Les interactions (HOT/MELT, OPEN/SHUT, SINK/KILL, WIN) sont appliquées
+      après tous les déplacements, séparément par couche FLOATING.
 ===============================================================================
 */
 
 #include "movement.h"
 #include "types.h"
+#include "core/rules.h"   // apply_transformations()
 #include <algorithm>
+#include <vector>
 
 namespace baba {
 
 // ============================================================================
 //  Helpers FLOATING
 // ============================================================================
+
+/*
+    same_float_layer() :
+      Compare deux ensembles de propriétés pour savoir s’ils sont sur la même
+      "couche" FLOATING (sol / air).
+*/
 static inline bool same_float_layer(const Properties& a, const Properties& b) {
     return a.floating == b.floating;
 }
@@ -38,8 +55,30 @@ static inline bool same_float_layer(const Properties& a, const Properties& b) {
 
 
 // ============================================================================
-//  try_push_chain() — Pousse une chaîne d’objets PUSH (FLOATING-aware)
+//  try_push_chain() — Pousse une chaîne d’objets PUSH (FLOAT-aware)
 // ============================================================================
+/*
+    try_push_chain() :
+      Tente de pousser une chaîne d’objets PUSH à partir d’une case cible.
+
+      - startX, startY : première case à pousser (devant le mover)
+      - dx, dy         : direction du mouvement
+      - moverIsFloat   : couche FLOATING du "mover" (YOU ou MOVE)
+
+      Comportement :
+        - On construit une chaîne de cases successives tant que :
+            * tous les objets de la couche sont PUSH
+            * aucun STOP non-pushable ne bloque
+        - Si la chaîne est vide :
+            * on autorise la superposition si aucune propriété STOP sur la
+              même couche FLOATING.
+        - Si la chaîne n’est pas vide :
+            * on vérifie la case finale :
+                - hors limites → échec
+                - STOP non-pushable → échec
+                - SINK → destruction des objets SINK de la couche, puis succès
+            * on déplace la chaîne tail→head.
+*/
 static bool try_push_chain(Grid& grid, const PropertyTable& props,
                            int startX, int startY, int dx, int dy,
                            bool moverIsFloat)
@@ -65,7 +104,7 @@ static bool try_push_chain(Grid& grid, const PropertyTable& props,
             if (pr.floating != moverIsFloat)
                 continue;
 
-            // STOP non-pushable bloque
+            // STOP non-pushable bloque immédiatement
             if (pr.stop && !pr.push)
                 return false;
 
@@ -120,7 +159,7 @@ static bool try_push_chain(Grid& grid, const PropertyTable& props,
             return false;
     }
 
-    // 4) SINK sur la case finale
+    // 4) SINK sur la case finale : on détruit les objets SINK de la couche
     if (!finalIsEmpty && finalAllSink) {
         finalCell.objects.erase(
             std::remove_if(finalCell.objects.begin(), finalCell.objects.end(),
@@ -173,8 +212,115 @@ static bool try_push_chain(Grid& grid, const PropertyTable& props,
 
 
 // ============================================================================
+//  SWAP helper — échange les objets "movers" avec les objets SWAP
+// ============================================================================
+/*
+    apply_swap() :
+      Gère la propriété SWAP pour un "mover" (YOU ou MOVE).
+
+      - fromX, fromY : position du mover
+      - toX, toY     : case cible
+      - moverIsFloat : couche FLOATING du mover
+      - isMover      : prédicat sur Properties (YOU ou MOVE)
+
+      Comportement :
+        - Si la case cible contient au moins un objet SWAP sur la même couche :
+            * on extrait les movers de la case source
+            * on extrait les SWAP de la case cible
+            * on échange les deux ensembles
+        - Sinon : ne fait rien, retourne false.
+*/
+template<typename IsMoverPredicate>
+static bool apply_swap(Grid& grid, const PropertyTable& props,
+                       int fromX, int fromY, int toX, int toY,
+                       bool moverIsFloat,
+                       IsMoverPredicate isMover)
+{
+    if (!grid.in_bounds(toX, toY) || !grid.in_play_area(toX, toY))
+        return false;
+
+    Cell& src = grid.cell(fromX, fromY);
+    Cell& dst = grid.cell(toX, toY);
+
+    bool hasSwap = false;
+
+    for (auto& obj : dst.objects) {
+        const Properties& pr = props[(int)obj.type];
+        if (pr.floating == moverIsFloat && pr.swap) {
+            hasSwap = true;
+            break;
+        }
+    }
+
+    if (!hasSwap)
+        return false;
+
+    std::vector<Object> movers;
+    std::vector<Object> swappers;
+
+    // Extraire les movers (YOU ou MOVE) de la bonne couche
+    for (auto& obj : src.objects) {
+        const Properties& pr = props[(int)obj.type];
+        if (pr.floating == moverIsFloat && isMover(pr))
+            movers.push_back(obj);
+    }
+
+    // Extraire les SWAP de la bonne couche
+    for (auto& obj : dst.objects) {
+        const Properties& pr = props[(int)obj.type];
+        if (pr.floating == moverIsFloat && pr.swap)
+            swappers.push_back(obj);
+    }
+
+    if (movers.empty() || swappers.empty())
+        return false;
+
+    // Supprimer movers de src
+    src.objects.erase(
+        std::remove_if(src.objects.begin(), src.objects.end(),
+                       [&](const Object& o){
+                           const Properties& pr = props[(int)o.type];
+                           return pr.floating == moverIsFloat && isMover(pr);
+                       }),
+        src.objects.end()
+    );
+
+    // Supprimer swappers de dst
+    dst.objects.erase(
+        std::remove_if(dst.objects.begin(), dst.objects.end(),
+                       [&](const Object& o){
+                           const Properties& pr = props[(int)o.type];
+                           return pr.floating == moverIsFloat && pr.swap;
+                       }),
+        dst.objects.end()
+    );
+
+    // Échanger
+    for (auto& o : movers)
+        dst.objects.push_back(o);
+    for (auto& o : swappers)
+        src.objects.push_back(o);
+
+    return true;
+}
+
+
+
+// ============================================================================
 //  MOVE automatique (avant YOU)
 // ============================================================================
+/*
+    apply_move() :
+      Applique la propriété MOVE dans une direction (dx, dy).
+
+      - Snapshot initial des positions des objets MOVE (pour éviter les
+        effets de "double move" dans la même frame).
+      - Pour chaque mover :
+          * SWAP (si possible)
+          * STOP/PUSH sur la même couche
+          * PUSH (chaîne)
+          * déplacement du mover
+*/
 static void apply_move(Grid& grid, const PropertyTable& props, int dx, int dy)
 {
     struct Mover { int x, y; bool floating; };
@@ -195,6 +341,13 @@ static void apply_move(Grid& grid, const PropertyTable& props, int dx, int dy)
 
         if (!grid.in_bounds(nx, ny) || !grid.in_play_area(nx, ny))
             continue;
+
+        // SWAP avant STOP/PUSH
+        if (apply_swap(grid, props, m.x, m.y, nx, ny, m.floating,
+                       [](const Properties& pr){ return pr.move; }))
+        {
+            continue;
+        }
 
         // STOP non-pushable sur la même couche
         bool blocked = false;
@@ -230,17 +383,41 @@ static void apply_move(Grid& grid, const PropertyTable& props, int dx, int dy)
 
 
 // ============================================================================
-//  step() — Déplacement YOU + interactions
+//  step() — Transformations + déplacement YOU + interactions
 // ============================================================================
-MoveResult step(Grid& grid, const PropertyTable& props, int dx, int dy)
+/*
+    step() :
+      Pipeline complet pour une frame de mouvement dans une direction (dx, dy) :
+
+        1) apply_transformations(grid, transforms)
+        2) MOVE automatique (si dx/dy != 0)
+        3) YOU (déplacement joueur, PUSH, PULL, SWAP)
+        4) Interactions post-mouvement par couche FLOATING :
+             - WIN
+             - KILL / SINK (détection de mort)
+             - HOT/MELT (destruction des MELT)
+             - OPEN/SHUT (destruction des OPEN/SHUT)
+             - SINK (destruction des non-SINK si plusieurs objets)
+
+      Retourne :
+        - MoveResult.hasWon
+        - MoveResult.hasDied
+*/
+MoveResult step(Grid& grid,
+                const PropertyTable& props,
+                const TransformSetTable& transforms,
+                int dx, int dy)
 {
     MoveResult result{};
 
-    // 0) MOVE automatique
+    // 0) Appliquer les transformations avant tout mouvement
+    apply_transformations(grid, transforms);
+
+    // 1) MOVE automatique
     if (dx != 0 || dy != 0)
         apply_move(grid, props, dx, dy);
 
-    // 1) Snapshot YOU
+    // 2) Snapshot YOU
     struct YouPos { int x, y; bool floating; };
     std::vector<YouPos> yous;
 
@@ -250,7 +427,7 @@ MoveResult step(Grid& grid, const PropertyTable& props, int dx, int dy)
                 if (props[(int)obj.type].you)
                     yous.push_back({x, y, props[(int)obj.type].floating});
 
-    // 2) Déplacements YOU
+    // 3) Déplacements YOU
     for (auto& yp : yous) {
 
         int nx = yp.x + dx;
@@ -258,6 +435,30 @@ MoveResult step(Grid& grid, const PropertyTable& props, int dx, int dy)
 
         if (!grid.in_bounds(nx, ny) || !grid.in_play_area(nx, ny))
             continue;
+
+        // SWAP avant STOP/PUSH
+        if (apply_swap(grid, props, yp.x, yp.y, nx, ny, yp.floating,
+                       [](const Properties& pr){ return pr.you; }))
+        {
+            // PULL après SWAP (on considère que YOU a "bougé")
+            int backX = yp.x - dx;
+            int backY = yp.y - dy;
+
+            if (grid.in_bounds(backX, backY) && grid.in_play_area(backX, backY)) {
+                Cell& back = grid.cell(backX, backY);
+                Cell& dst  = grid.cell(nx, ny);
+                for (auto it = back.objects.begin(); it != back.objects.end(); )
+                    if (props[(int)it->type].pull &&
+                        props[(int)it->type].floating == yp.floating)
+                    {
+                        dst.objects.push_back(*it);
+                        it = back.objects.erase(it);
+                    }
+                    else ++it;
+            }
+
+            continue;
+        }
 
         // STOP non-pushable (même couche)
         bool blocked = false;
@@ -308,11 +509,11 @@ MoveResult step(Grid& grid, const PropertyTable& props, int dx, int dy)
 
 
     // ========================================================================
-    // 3) Effets post-mouvement (séparés par couche FLOATING)
+    // 4) Effets post-mouvement (séparés par couche FLOATING)
     // ========================================================================
     for (auto& cell : grid.cells) {
 
-        // On traite d'abord NON-FLOATING (layer 0), puis FLOATING (layer 1)
+        // On traite d’abord NON-FLOATING (layer 0), puis FLOATING (layer 1)
         for (int layer = 0; layer < 2; ++layer) {
 
             bool layerIsFloat = (layer == 1);
@@ -342,15 +543,15 @@ MoveResult step(Grid& grid, const PropertyTable& props, int dx, int dy)
                 if (pr.shut)     hasShut = true;
             }
 
-            // WIN
+            // WIN : YOU + WIN sur la même couche
             if (hasYou && hasWin)
                 result.hasWon = true;
 
-            // KILL / SINK
+            // KILL / SINK : YOU + KILL/SINK sur la même couche → mort
             if (hasYou && (hasKill || hasSink))
                 result.hasDied = true;
 
-            // HOT + MELT
+            // HOT + MELT : on supprime les MELT de cette couche
             if (hasHot && hasMelt) {
                 cell.objects.erase(
                     std::remove_if(cell.objects.begin(), cell.objects.end(),
@@ -362,7 +563,7 @@ MoveResult step(Grid& grid, const PropertyTable& props, int dx, int dy)
                 );
             }
 
-            // OPEN + SHUT
+            // OPEN + SHUT : on supprime les deux de cette couche
             if (hasOpen && hasShut) {
                 cell.objects.erase(
                     std::remove_if(cell.objects.begin(), cell.objects.end(),
@@ -373,6 +574,28 @@ MoveResult step(Grid& grid, const PropertyTable& props, int dx, int dy)
                                    }),
                     cell.objects.end()
                 );
+            }
+
+            // SINK : si plusieurs objets sur la même couche, on supprime
+            // tous les objets non-SINK (optionnel, mais cohérent).
+            if (hasSink) {
+                int countLayer = 0;
+                for (auto& obj : cell.objects) {
+                    const Properties& pr = props[(int)obj.type];
+                    if (pr.floating == layerIsFloat)
+                        ++countLayer;
+                }
+
+                if (countLayer > 1) {
+                    cell.objects.erase(
+                        std::remove_if(cell.objects.begin(), cell.objects.end(),
+                                       [&](const Object& o){
+                                           const Properties& pr = props[(int)o.type];
+                                           return pr.floating == layerIsFloat && !pr.sink;
+                                       }),
+                        cell.objects.end()
+                    );
+                }
             }
         }
     }

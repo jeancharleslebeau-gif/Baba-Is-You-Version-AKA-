@@ -1,17 +1,46 @@
-
 /*
 ===============================================================================
   game.cpp — Implémentation de la logique de jeu
 -------------------------------------------------------------------------------
   Rôle :
     - Initialiser l’état global du jeu.
-    - Charger les niveaux.
-    - Appliquer les règles (rules_parse).
-    - Appliquer les déplacements (step).
+    - Charger les niveaux (load_level).
+    - Appliquer les règles :
+         * SUBJECT IS STATUS
+             → propriétés logiques (YOU, PUSH, STOP, HOT, MELT, MOVE, FLOAT…)
+         * SUBJECT IS SUBJECT
+             → transformations d’objets (ROCK→WALL, EMPTY→ROCK, LAVA→FLAG…)
+      via rules_parse() qui remplit :
+         * PropertyTable
+             (propriétés logiques appliquées aux objets)
+         * TransformSetTable
+             (transformations multiples, chaînes et cycles)
+             ex :
+                ROCK IS WALL + ROCK IS FLAG → ROCK devient WALL + FLAG
+                A→B→C→A → cycle détecté et géré proprement
+
+    - Appliquer les déplacements (step) :
+         * MOVE automatique (avant YOU)
+         * YOU (déplacement joueur)
+         * PUSH / PULL
+         * SWAP
+         * STOP
+         * Interactions post-mouvement :
+               HOT/MELT, OPEN/SHUT, SINK, KILL, WIN
+         * Gestion des couches FLOATING (sol / air)
+
     - Gérer les états (victoire, mort).
-    - Dessiner la grille avec caméra (centrage sur YOU + joystick libre).
+    - Dessiner la grille avec caméra centrée sur YOU + joystick libre.
     - Fournir transitions (fade_in/out) et écran de titre.
     - Helpers de progression (win/continue, restart after death).
+
+  Notes :
+    - Les transformations sont appliquées AVANT les déplacements.
+    - Les règles sont recalculées APRÈS chaque mouvement.
+    - Le moteur est désormais compatible avec :
+         * transformations multiples
+         * transformations en chaîne
+         * transformations circulaires
 ===============================================================================
 */
 
@@ -169,16 +198,16 @@ void game_init() {
 // ============================================================================
 //  CHARGEMENT DE NIVEAU
 // ============================================================================
-// ============================================================================
-//  CHARGEMENT DE NIVEAU
-// ============================================================================
 void game_load_level(int index) {
     g_state.currentLevel = index;
     g_state.hasWon = false;
     g_state.hasDied = false;
 
     load_level(index, g_state.grid);
-    rules_parse(g_state.grid, g_state.props);
+
+    // Analyse des règles (propriétés + transformations)
+    rules_parse(g_state.grid, g_state.props, g_state.transforms);
+	apply_transformations(g_state.grid, g_state.transforms);
 
     g_camera = Camera{};
 
@@ -186,23 +215,16 @@ void game_load_level(int index) {
     MusicID music = MusicID::NONE;
 
     if (g_forcedMusic != MusicID::NONE) {
-        // Mode override
         music = g_forcedMusic;
-
-        // Si l’override n’est pas persistant, on le consomme une fois
-        if (!g_forceMusicAcrossLevels) {
+        if (!g_forceMusicAcrossLevels)
             g_forcedMusic = MusicID::NONE;
-        }
     } else {
-        // Musique par défaut du niveau
         music = getMusicForLevel(index);
     }
 
-    // Lecture de la musique choisie
     audio_request_music(music);
-	
-	// Positionner la caméra
-	update_camera(g_state.grid, g_state.props, 0, 0);
+
+    update_camera(g_state.grid, g_state.props, 0, 0);
 }
 
 
@@ -221,33 +243,33 @@ void game_show_title()
 //  game_update() — Mise à jour logique du jeu
 // ============================================================================
 void game_update() {
-	// Réinitialiser les flags à chaque frame
     g_state.hasWon  = false;
     g_state.hasDied = false;
 
-    // Lecture des entrées directionnelles
     int dx = 0, dy = 0;
     if (g_keys.left)  dx = -1;
     else if (g_keys.right) dx = +1;
     else if (g_keys.up)    dy = -1;
     else if (g_keys.down)  dy = +1;
 
-    // Déplacement si demandé
-    if (dx != 0 || dy != 0) {
-		// step() : snapshot → push → move → effects
-        MoveResult r = step(g_state.grid, g_state.props, dx, dy);
-		
-		// Recalcul des règles après chaque mouvement
-        rules_parse(g_state.grid, g_state.props);
-		
-		// Mettre à jour les flags
-        g_state.hasWon  = r.hasWon;
-        g_state.hasDied = r.hasDied;
-    }
+	if (dx != 0 || dy != 0) {
+		MoveResult r = step(g_state.grid, g_state.props, g_state.transforms, dx, dy);
 
-    // Mise à jour caméra (toujours, même si pas de déplacement)
+		rules_parse(g_state.grid, g_state.props, g_state.transforms);
+		apply_transformations(g_state.grid, g_state.transforms);
+
+		g_state.hasWon  = r.hasWon;
+		g_state.hasDied = r.hasDied;
+	} else {
+		// Même sans mouvement, les règles peuvent changer la grille
+		rules_parse(g_state.grid, g_state.props, g_state.transforms);
+		apply_transformations(g_state.grid, g_state.transforms);
+	}
+
+
     update_camera(g_state.grid, g_state.props, g_keys.joyX, g_keys.joyY);
 }
+
 
 /* ===============================================================================
    Helpers de progression (utilisés par task_game)
@@ -300,8 +322,5 @@ void game_draw() {
         }
     }
 }
-
-
-
 
 } // namespace baba
