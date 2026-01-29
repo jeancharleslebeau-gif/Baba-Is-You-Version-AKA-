@@ -6,6 +6,7 @@
 
 #pragma once
 #include <cstdint>
+#include <sstream>
 #include "core/grid.h"
 
 namespace baba {
@@ -92,5 +93,7 @@ inline int levels_count() {
 }
 
 void load_level(int index, Grid& g);
+void load_level_from_text(const char* text, Grid& out);
+std::string export_level_to_text(const LevelInfo& info);
 
 } // namespace baba

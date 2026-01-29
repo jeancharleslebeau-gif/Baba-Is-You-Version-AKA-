@@ -1,46 +1,26 @@
 /*
 ===============================================================================
-  game.cpp — Implémentation de la logique de jeu
+  game.cpp — Moteur principal du jeu Baba
 -------------------------------------------------------------------------------
   Rôle :
-    - Initialiser l’état global du jeu.
-    - Charger les niveaux (load_level).
-    - Appliquer les règles :
-         * SUBJECT IS STATUS
-             → propriétés logiques (YOU, PUSH, STOP, HOT, MELT, MOVE, FLOAT…)
-         * SUBJECT IS SUBJECT
-             → transformations d’objets (ROCK→WALL, EMPTY→ROCK, LAVA→FLAG…)
-      via rules_parse() qui remplit :
-         * PropertyTable
-             (propriétés logiques appliquées aux objets)
-         * TransformSetTable
-             (transformations multiples, chaînes et cycles)
-             ex :
-                ROCK IS WALL + ROCK IS FLAG → ROCK devient WALL + FLAG
-                A→B→C→A → cycle détecté et géré proprement
-
-    - Appliquer les déplacements (step) :
-         * MOVE automatique (avant YOU)
-         * YOU (déplacement joueur)
-         * PUSH / PULL
-         * SWAP
-         * STOP
-         * Interactions post-mouvement :
-               HOT/MELT, OPEN/SHUT, SINK, KILL, WIN
-         * Gestion des couches FLOATING (sol / air)
-
-    - Gérer les états (victoire, mort).
-    - Dessiner la grille avec caméra centrée sur YOU + joystick libre.
-    - Fournir transitions (fade_in/out) et écran de titre.
-    - Helpers de progression (win/continue, restart after death).
+    - Gérer l’état global du jeu (GameState, GameMode).
+    - Charger les niveaux (normaux + custom).
+    - Appliquer le pipeline complet :
+         * rules_parse()
+         * transformations
+         * step() (MOVE auto + YOU + interactions)
+    - Gérer la caméra centrée sur YOU + joystick libre.
+    - Gérer les transitions (fade-in / fade-out).
+    - Gérer la musique (forcedMusic + musique par niveau).
+    - Gérer le toggle son global (touche D).
+    - Dessiner la grille.
+    - Fournir l’écran de titre (GameMode::Menu).
+    - Déléguer le menu OPTIONS à options.cpp (GameMode::Options).
 
   Notes :
-    - Les transformations sont appliquées AVANT les déplacements.
-    - Les règles sont recalculées APRÈS chaque mouvement.
-    - Le moteur est désormais compatible avec :
-         * transformations multiples
-         * transformations en chaîne
-         * transformations circulaires
+    - Ce fichier ne contient plus aucun menu interne.
+    - Ce fichier ne contient plus aucune logique filesystem interne.
+    - Ce fichier est désormais un moteur pur.
 ===============================================================================
 */
 
@@ -48,50 +28,55 @@
 #include "core/movement.h"
 #include "core/sprites.h"
 #include "core/audio.h"
-#include "game/levels.h"
 #include "core/input.h"
 #include "core/graphics.h"
+#include "core/filesystem.h"
+#include "core/types.h"
+
+#include "game/levels.h"
+#include "game/config.h"
+#include "game/options.h"
+#include "game/music_map.h"
+#include "game/menu.h"
 
 #include "assets/gfx/title.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include <algorithm> // min/max
-#include "music_map.h"
 
+
+#include <algorithm>
+#include <vector>
 
 namespace baba {
 
 // ============================================================================
 //  ÉTAT GLOBAL DU JEU
 // ============================================================================
-static GameState g_state;
-static GameMode  g_mode = GameMode::Title;
+GameState g_state;
+static GameMode  g_mode = GameMode::Menu;
 
-// Musique forcée (optionnelle) et mode de persistance
+// Son global ON/OFF (toggle avec D en gameplay)
+bool soundEnabled = true;
+
+// Musique forcée (choisie dans options.cpp)
 static MusicID g_forcedMusic = MusicID::NONE;
-static bool    g_forceMusicAcrossLevels = false; // true = persister sur tous les niveaux
-
+static bool    g_forceMusicAcrossLevels = false;
+std::vector<GameSnapshot> g_undoStack;
 
 GameState& game_state() { return g_state; }
 GameMode&  game_mode()  { return g_mode; }
 
-// Définir une musique forcée.
-// - id != NONE : forcer cette musique.
-// - id == NONE : revenir au comportement normal (musique par niveau).
-// - persistAcrossLevels = true : la même musique est utilisée pour tous les niveaux.
-// - persistAcrossLevels = false : override "one-shot" (réinitialisé au prochain chargement).
+void load_config();
+void save_config();
+
 void game_set_forced_music(MusicID id, bool persistAcrossLevels)
 {
     g_forcedMusic = id;
     g_forceMusicAcrossLevels = persistAcrossLevels;
 }
 
-// Récupérer la musique forcée actuelle (pour le menu, debug éventuel)
 MusicID game_get_forced_music()
 {
     return g_forcedMusic;
 }
-
 
 // ============================================================================
 //  Caméra
@@ -105,65 +90,85 @@ struct Camera {
 
 static Camera g_camera;
 
-constexpr int SCREEN_W      = 320;
-constexpr int SCREEN_H      = 240;
-constexpr int VIEW_TILES_W  = SCREEN_W / TILE_SIZE; // 20
-constexpr int VIEW_TILES_H  = SCREEN_H / TILE_SIZE; // 15
+constexpr int VIEW_TILES_W  = SCREEN_W / TILE_SIZE;
+constexpr int VIEW_TILES_H  = SCREEN_H / TILE_SIZE;
 
 struct Point { int x; int y; };
+static int g_selectedYou = 0;
 
-// Trouve la position du premier objet YOU
-static Point find_you(const Grid& g, const PropertyTable& props) {
-    for (int y = 0; y < g.height; ++y) {
-        for (int x = 0; x < g.width; ++x) {
-            for (const auto& obj : g.cell(x, y).objects) {
-                const Properties& pr = props[(int)obj.type];
-                if (pr.you) {
-                    return {x, y};
-                }
-            }
-        }
-    }
-    return {g.width / 2, g.height / 2}; // fallback
+// Trouve toutes les positions YOU
+static std::vector<Point> find_all_you(const Grid& g, const PropertyTable& props) {
+    std::vector<Point> out;
+
+    for (int y = 0; y < g.height; ++y)
+        for (int x = 0; x < g.width; ++x)
+            for (const auto& obj : g.cell(x, y).objects)
+                if (props[(int)obj.type].you)
+                    out.push_back({x, y});
+
+    return out;
 }
 
-// Mise à jour de la caméra
-static void update_camera(const Grid& g, const PropertyTable& props,
-                          int joyX, int joyY)
+// Cible caméra = YOU sélectionné ou centre de masse
+static Point compute_camera_target(const Grid& g, const PropertyTable& props) {
+    auto yous = find_all_you(g, props);
+
+    if (yous.empty())
+        return {g.width / 2, g.height / 2};
+
+    if (g_selectedYou < (int)yous.size())
+        return yous[g_selectedYou];
+
+    float sx = 0, sy = 0;
+    for (auto& p : yous) { sx += p.x; sy += p.y; }
+    return {int(sx / yous.size()), int(sy / yous.size())};
+}
+
+// Mise à jour caméra
+static void update_camera(const Grid& g, const PropertyTable& props, int joyX, int joyY)
 {
-    Point youPos = find_you(g, props);
+    Point target = compute_camera_target(g, props);
 
-    float centerX = youPos.x - (VIEW_TILES_W / 2.0f);
-    float centerY = youPos.y - (VIEW_TILES_H / 2.0f);
+    float idealX = target.x - (VIEW_TILES_W / 2.0f);
+    float idealY = target.y - (VIEW_TILES_H / 2.0f);
 
-    if (joyX != 0 || joyY != 0) {
-        g_camera.offsetX += joyX;
-        g_camera.offsetY += joyY;
+    const float joyFactor = 0.3f;
+    g_camera.offsetX += joyX * joyFactor;
+    g_camera.offsetY += joyY * joyFactor;
+
+    float camX = idealX + g_camera.offsetX;
+    float camY = idealY + g_camera.offsetY;
+
+    float levelW = g.playMaxX - g.playMinX + 1;
+    float levelH = g.playMaxY - g.playMinY + 1;
+
+    // Clamp horizontal
+    if (levelW < VIEW_TILES_W) {
+        camX = g.playMinX - (VIEW_TILES_W - levelW) * 0.5f;
     } else {
-        g_camera.offsetX = 0.0f;
-        g_camera.offsetY = 0.0f;
+        camX = std::clamp(camX,
+                          (float)g.playMinX,
+                          (float)(g.playMaxX - VIEW_TILES_W + 1));
     }
 
-    g_camera.x = centerX + g_camera.offsetX;
-    g_camera.y = centerY + g_camera.offsetY;
+    // Clamp vertical
+    if (levelH < VIEW_TILES_H) {
+        camY = g.playMinY - (VIEW_TILES_H - levelH) * 0.5f;
+    } else {
+        camY = std::clamp(camY,
+                          (float)g.playMinY,
+                          (float)(g.playMaxY - VIEW_TILES_H + 1));
+    }
 
-    float minX = static_cast<float>(g.playMinX);
-    float minY = static_cast<float>(g.playMinY);
-    float maxX = static_cast<float>(g.playMaxX - VIEW_TILES_W + 1);
-    float maxY = static_cast<float>(g.playMaxY - VIEW_TILES_H + 1);
+	// Forcer la caméra à être alignée sur la grille
+	g_camera.x = static_cast<int>(camX);
+	g_camera.y = static_cast<int>(camY);
 
-    if (g_camera.x < minX) g_camera.x = minX;
-    if (g_camera.y < minY) g_camera.y = minY;
-    if (g_camera.x > maxX) g_camera.x = maxX;
-    if (g_camera.y > maxY) g_camera.y = maxY;
 }
 
-
-/*
-===============================================================================
-  Transitions (fade-in / fade-out)
-===============================================================================
-*/
+// ============================================================================
+//  Transitions
+// ============================================================================
 void fade_out(int delayMs, int steps)
 {
     for (int i = 0; i < steps; i++) {
@@ -187,100 +192,258 @@ void fade_in(int delayMs, int steps)
 }
 
 // ============================================================================
-//  INITIALISATION DU JEU
+//  Structure dossiers + niveaux custom
+// ============================================================================
+static const char* CUSTOM_SLOTS[3] = {
+    "/babaisyou/levels/custom1.txt",
+    "/babaisyou/levels/custom2.txt",
+    "/babaisyou/levels/custom3.txt"
+};
+
+void ensure_custom_level_structure()
+{
+    if (!fs_exists("/babaisyou"))
+        fs_mkdir("/babaisyou");
+
+    if (!fs_exists("/babaisyou/levels"))
+        fs_mkdir("/babaisyou/levels");
+
+    const char* paths[3] = {
+        CUSTOM_SLOTS[0],
+        CUSTOM_SLOTS[1],
+        CUSTOM_SLOTS[2]
+    };
+
+    const LevelInfo* defaults[3] = {
+        &levels[0],
+        &levels[1],
+        &levels[2]
+    };
+
+	for (int i = 0; i < 3; ++i) {
+		if (!fs_exists(paths[i])) {
+
+			std::string out;
+
+			for (int y = 0; y < defaults[i]->height; ++y) {
+				for (int x = 0; x < defaults[i]->width; ++x) {
+
+					// --- Récupération brute depuis levels_data (uint8_t) ---
+					uint8_t raw = defaults[i]->data[y * defaults[i]->width + x];
+
+					// --- Conversion propre vers ObjectType ---
+					ObjectType obj = static_cast<ObjectType>(raw);
+
+					// --- Conversion ObjectType → texte ---
+					out += object_type_to_text(obj);
+
+					if (x + 1 < defaults[i]->width)
+						out += ", ";
+				}
+				out += "\n";
+			}
+
+			fs_write_text(paths[i], out.c_str());
+		}
+	}
+
+}
+
+// ============================================================================
+//  INITIALISATION
 // ============================================================================
 void game_init() {
+    ensure_custom_level_structure();
+    load_config();
+
     g_state = GameState{};
     sprites_init();
-    game_load_level(0);
+
+    g_mode = GameMode::Menu;
+	menu_init();
 }
 
 // ============================================================================
 //  CHARGEMENT DE NIVEAU
 // ============================================================================
-void game_load_level(int index) {
+void game_load_level(int index)
+{
     g_state.currentLevel = index;
     g_state.hasWon = false;
     g_state.hasDied = false;
 
-    load_level(index, g_state.grid);
+    // -------------------------------------------------------------------------
+    // 1) Charger la grille (niveaux normaux ou custom)
+    // -------------------------------------------------------------------------
+    if (index <= -1 && index >= -3) {
+        // Niveaux custom : index = -1, -2, -3 → slots 0,1,2
+        int slot = -1 - index;
+        std::string text;
 
-    // Analyse des règles (propriétés + transformations)
+        if (fs_read_text(CUSTOM_SLOTS[slot], text)) {
+            // Charge depuis texte
+            load_level_from_text(text.c_str(), g_state.grid);
+        } else {
+            // Slot vide → fallback sur niveau 0
+            load_level(0, g_state.grid);
+        }
+    } else {
+        // Niveau normal
+        load_level(index, g_state.grid);
+    }
+
+    // -------------------------------------------------------------------------
+    // 2) Recalculer les règles + transformations
+    // -------------------------------------------------------------------------
     rules_parse(g_state.grid, g_state.props, g_state.transforms);
-	apply_transformations(g_state.grid, g_state.transforms);
+    apply_transformations(g_state.grid, g_state.transforms);
 
+    // -------------------------------------------------------------------------
+    // 3) Réinitialiser la caméra et la sélection
+    // -------------------------------------------------------------------------
     g_camera = Camera{};
+    g_selectedYou = 0;
 
-    // Sélection de la musique
+    // -------------------------------------------------------------------------
+    // 4) Gestion de la musique
+    // -------------------------------------------------------------------------
     MusicID music = MusicID::NONE;
 
     if (g_forcedMusic != MusicID::NONE) {
+        // Musique forcée via options
         music = g_forcedMusic;
+
         if (!g_forceMusicAcrossLevels)
             g_forcedMusic = MusicID::NONE;
+
     } else {
+        // Musique par défaut du niveau
         music = getMusicForLevel(index);
     }
 
     audio_request_music(music);
 
+    // -------------------------------------------------------------------------
+    // 5) Mise à jour caméra initiale
+    // -------------------------------------------------------------------------
     update_camera(g_state.grid, g_state.props, 0, 0);
 }
 
 
 // ============================================================================
-//  ÉCRAN DE TITRE
+//  ÉCRAN DE TITRE (GameMode::Menu)
 // ============================================================================
 void game_show_title()
 {
     gfx_clear(COLOR_BLACK);
-    // Adapter si image en mode portrait: params (pixels, w, h, x, y)
     gfx_blit(title_pixels, 320, 240, 0, 0);
     gfx_flush();
 }
 
 // ============================================================================
-//  game_update() — Mise à jour logique du jeu
+//  game_update() — uniquement gameplay + redirection vers options
 // ============================================================================
 void game_update() {
+
+    if (g_mode == GameMode::Options) {
+        options_update();
+        return;
+    }
+
+    if (g_mode == GameMode::Menu) {
+        menu_update();
+        return;
+    }
+
     g_state.hasWon  = false;
     g_state.hasDied = false;
 
+    // --- Toggle son global (D) ---
+    if (g_keys.D) {
+        printf("D DETECTED\n");
+        soundEnabled = !soundEnabled;
+        options_save();
+
+        if (soundEnabled) {
+            audio_set_music_volume(g_audio_settings.music_volume);
+            audio_set_sfx_volume(g_audio_settings.sfx_volume);
+        } else {
+            audio_set_music_volume(0);
+            audio_set_sfx_volume(0);
+        }
+    }
+
+    // --- UNDO (C) ---
+    if (g_keys.C && !g_undoStack.empty()) {
+        printf("C DETECTED IN\n");
+
+        const GameSnapshot& snap = g_undoStack.back();
+        g_state.grid       = snap.grid;
+        g_state.props      = snap.props;
+        g_state.transforms = snap.transforms;
+        g_undoStack.pop_back();
+
+        rules_parse(g_state.grid, g_state.props, g_state.transforms);
+        apply_transformations(g_state.grid, g_state.transforms);
+
+        return;
+    }
+
+    // --- Toujours recalculer les règles AVANT mouvement ---
+    rules_parse(g_state.grid, g_state.props, g_state.transforms);
+    apply_transformations(g_state.grid, g_state.transforms);
+
+    // --- Lecture du mouvement (sans else-if) ---
     int dx = 0, dy = 0;
+
     if (g_keys.left)  dx = -1;
-    else if (g_keys.right) dx = +1;
-    else if (g_keys.up)    dy = -1;
-    else if (g_keys.down)  dy = +1;
+    if (g_keys.right) dx = +1;
+    if (g_keys.up)    dy = -1;
+    if (g_keys.down)  dy = +1;
 
-	if (dx != 0 || dy != 0) {
-		MoveResult r = step(g_state.grid, g_state.props, g_state.transforms, dx, dy);
+    // --- Mouvement ---
+    if (dx != 0 || dy != 0) {
 
-		rules_parse(g_state.grid, g_state.props, g_state.transforms);
-		apply_transformations(g_state.grid, g_state.transforms);
+        // Sauvegarde UNDO
+        if (g_undoStack.size() >= MAX_UNDO)
+            g_undoStack.erase(g_undoStack.begin());
 
-		g_state.hasWon  = r.hasWon;
-		g_state.hasDied = r.hasDied;
-	} else {
-		// Même sans mouvement, les règles peuvent changer la grille
-		rules_parse(g_state.grid, g_state.props, g_state.transforms);
-		apply_transformations(g_state.grid, g_state.transforms);
-	}
+        g_undoStack.push_back({
+            g_state.grid,
+            g_state.props,
+            g_state.transforms
+        });
 
+        MoveResult r = step(g_state.grid, g_state.props, g_state.transforms, dx, dy);
+
+        g_state.hasWon  = r.hasWon;
+        g_state.hasDied = r.hasDied;
+
+        if (g_state.hasWon) {
+            game_win_continue();
+            return;
+        }
+
+        if (g_state.hasDied) {
+            game_restart_after_death();
+            return;
+        }
+
+        // Recalcul des règles après mouvement
+        rules_parse(g_state.grid, g_state.props, g_state.transforms);
+        apply_transformations(g_state.grid, g_state.transforms);
+    }
 
     update_camera(g_state.grid, g_state.props, g_keys.joyX, g_keys.joyY);
 }
 
-
-/* ===============================================================================
-   Helpers de progression (utilisés par task_game)
-   =============================================================================== 
-*/
+// ============================================================================
+//  Helpers progression
+// ============================================================================
 void game_win_continue() 
 { 
     int next = g_state.currentLevel + 1; 
-    if (next >= levels_count()) {
-        next = 0;
-    } 
+    if (next >= levels_count()) next = 0;
     game_load_level(next); 
 } 
 
@@ -289,38 +452,62 @@ void game_restart_after_death()
     game_load_level(g_state.currentLevel); 
 }
 
-/*
-===============================================================================
-  DESSIN DU JEU
-===============================================================================
-*/
+// ============================================================================
+//  DESSIN
+// ============================================================================
 void game_draw() {
+
+    if (g_mode == GameMode::Menu) {
+        menu_draw();
+        return;
+    }
+
+    if (g_mode == GameMode::Options) {
+        return;
+    }
+
+    // Fond noir rapide
     gfx_clear(COLOR_BLACK);
 
-    int camTileX = static_cast<int>(g_camera.x);
-    int camTileY = static_cast<int>(g_camera.y);
+    int camTileX = (int)g_camera.x;
+    int camTileY = (int)g_camera.y;
 
     int endX = std::min(camTileX + VIEW_TILES_W + 1, g_state.grid.width);
     int endY = std::min(camTileY + VIEW_TILES_H + 1, g_state.grid.height);
 
+    // Dessin de la grille
     for (int y = camTileY; y < endY; ++y) {
         for (int x = camTileX; x < endX; ++x) {
-            int screenX = static_cast<int>((x - g_camera.x) * TILE_SIZE);
-            int screenY = static_cast<int>((y - g_camera.y) * TILE_SIZE);
+
+            int screenX = (int)((x - g_camera.x) * TILE_SIZE);
+            int screenY = (int)((y - g_camera.y) * TILE_SIZE);
 
             if (screenX >= SCREEN_W || screenX + TILE_SIZE <= 0 ||
-                screenY >= SCREEN_H || screenY + TILE_SIZE <= 0) {
+                screenY >= SCREEN_H || screenY + TILE_SIZE <= 0)
                 continue;
-            }
 
             if (!g_state.grid.in_play_area(x, y)) {
-                gfx_fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE, 0x8410);
+                gfx_fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE, 0x7BEF);
                 continue;
             }
 
             draw_cell(screenX, screenY, g_state.grid.cell(x, y), g_state.props);
         }
     }
+
+    // Remplir la zone à droite si la grille ne couvre pas toute la largeur
+    int drawnWidth = (endX - camTileX) * TILE_SIZE;
+    if (drawnWidth < SCREEN_W) {
+        gfx_fillRect(drawnWidth, 0, SCREEN_W - drawnWidth, SCREEN_H, 0x7BEF);
+    }
+
+    // Remplir la zone en bas si la grille ne couvre pas toute la hauteur
+    int drawnHeight = (endY - camTileY) * TILE_SIZE;
+    if (drawnHeight < SCREEN_H) {
+        gfx_fillRect(0, drawnHeight, SCREEN_W, SCREEN_H - drawnHeight, 0x7BEF);
+    }
+
+    gfx_flush();
 }
 
 } // namespace baba

@@ -17,17 +17,21 @@ idf_component_register(
         core/movement.cpp
         core/sprites.cpp
         core/persist.cpp
+        core/filesystem.cpp    
+	core/types.cpp 
 
         # --- Logique de jeu ---
         game/game.cpp
         game/levels_data.cpp
         game/levels.cpp
+	game/config.cpp
         game/options.cpp
+        game/menu.cpp          
 
         # --- Tâches FreeRTOS ---
         tasks/task_game.cpp
         tasks/task_input.cpp
-	tasks/task_audio.cpp
+        tasks/task_audio.cpp
 
         # --- Assets ---
         assets/gfx/title.cpp
@@ -51,5 +55,5 @@ idf_component_register(
         assets/music
 
     REQUIRES
-	gamebuino
+        gamebuino
 )

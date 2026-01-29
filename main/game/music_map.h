@@ -26,7 +26,8 @@ enum class MusicID {
     MISTHART,
     WF_DRAGO,
     WF_MAGES,
-    NONE
+    NONE,
+	COUNT
 };
 
 // -----------------------------------------------------------------------------

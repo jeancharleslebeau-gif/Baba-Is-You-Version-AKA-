@@ -27,8 +27,12 @@
 #include "core/grid.h"
 #include "core/rules.h"
 #include "music_map.h"
+#include <vector>
 
 namespace baba {
+	
+// Bascule du son (ON/OFF)	
+extern bool soundEnabled;	
 
 MusicID game_get_forced_music();
 void    game_set_forced_music(MusicID id, bool persistAcrossLevels);
@@ -39,13 +43,26 @@ void    game_set_forced_music(MusicID id, bool persistAcrossLevels);
 ===============================================================================
 */
 struct GameState {
-    Grid grid;                    // Grille de jeu (objets et mots)
-    PropertyTable props;          // Propriétés dynamiques (YOU, PUSH, STOP, HOT…)
-    TransformSetTable transforms; // Transformations d’objets (ROCK→WALL, EMPTY→ROCK…)
-    bool hasWon  = false;         // Flag de victoire
-    bool hasDied = false;         // Flag de mort
-    int currentLevel = 0;         // Niveau courant (pour restart/advance)
+    Grid grid;
+    PropertyTable props;
+    TransformSetTable transforms;
+    bool hasWon = false;
+    bool hasDied = false;
+	int currentLevel;
 };
+
+// Snapshot léger pour UNDO
+struct GameSnapshot {
+    Grid grid;
+    PropertyTable props;
+    TransformSetTable transforms;
+};
+
+// Variables globales
+extern GameState g_state;
+static const size_t MAX_UNDO = 128;
+extern std::vector<GameSnapshot> g_undoStack;
+
 
 /*
 ===============================================================================
@@ -54,6 +71,7 @@ struct GameState {
 */
 enum class GameMode {
     Title,
+	Options,
     Playing,
     Win,
     Dead,
