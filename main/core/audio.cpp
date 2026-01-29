@@ -123,8 +123,9 @@ void audio_init()
 
 void audio_update()
 {
+	return;
     // Debug : tracer les premiers appels
-    static int dbg_upd = 0;
+    /* static int dbg_upd = 0;
     if (dbg_upd < 20)
     {
         printf("[AUDIO] audio_update()\n");
@@ -137,7 +138,7 @@ void audio_update()
     //   - appelle play_callback() sur chacune
     //   - mixe dans un buffer local
     //   - pousse le buffer dans gb_ll_audio_push_buffer()
-    g_player.pool();
+    g_player.pool(); */
 }
 
 // ============================================================================

@@ -4,7 +4,7 @@
 -------------------------------------------------------------------------------
 */
 
-#include <cmath>    // pour sinf, cosf, fmodf
+#include <cmath>
 #include "grid.h"
 #include "rules.h"
 #include "assets/gfx/atlas.h"
@@ -14,20 +14,24 @@
 namespace baba {
 
 // -----------------------------------------------------------------------------
-//  Helper RGB565 (remplace rgba() inexistant)
+//  Constructeur par défaut
 // -----------------------------------------------------------------------------
-static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b)
+Grid::Grid()
+    : width(0), height(0),
+      playMinX(0), playMaxX(0),
+      playMinY(0), playMaxY(0),
+      cells()
 {
-    return ((r & 0xF8) << 8) |
-           ((g & 0xFC) << 3) |
-           (b >> 3);
 }
 
 // -----------------------------------------------------------------------------
 //  Constructeur : crée une grille w×h avec des cellules vides
 // -----------------------------------------------------------------------------
 Grid::Grid(int w, int h)
-    : width(w), height(h), cells(w * h)
+    : width(w), height(h),
+      playMinX(0), playMaxX(w - 1),
+      playMinY(0), playMaxY(h - 1),
+      cells(w * h)
 {
 }
 
@@ -57,8 +61,24 @@ const Cell& Grid::cell(int x, int y) const
 }
 
 // -----------------------------------------------------------------------------
-//  Effet WIN procédural (mini feu d’artifice)
+//  Zone jouable (mise à jour par rules_parse)
 // -----------------------------------------------------------------------------
+bool Grid::in_play_area(int x, int y) const
+{
+    return x >= playMinX && x <= playMaxX &&
+           y >= playMinY && y <= playMaxY;
+}
+
+// -----------------------------------------------------------------------------
+//  Effet WIN procédural (inchangé)
+// -----------------------------------------------------------------------------
+static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b)
+{
+    return ((r & 0xF8) << 8) |
+           ((g & 0xFC) << 3) |
+           (b >> 3);
+}
+
 static void draw_win_effect(int px, int py, float time)
 {
     float cx = px + 8.0f;
@@ -75,7 +95,6 @@ static void draw_win_effect(int px, int py, float time)
         float px2 = cx + cosf(angle) * radius;
         float py2 = cy + sinf(angle) * radius;
 
-        // Alpha simulé en modulant la luminosité
         float alpha = 0.6f + 0.4f * sinf(t * 5.0f);
 
         uint8_t r = static_cast<uint8_t>(255 * alpha);
@@ -96,7 +115,6 @@ void draw_cell(int x, int y, const Cell& c, const PropertyTable& props)
     bool hasYou = false;
     bool hasWin = false;
 
-    // 1) Dessiner les objets
     for (auto& obj : c.objects) {
         draw_sprite(x, y, obj.type);
 
@@ -105,7 +123,6 @@ void draw_cell(int x, int y, const Cell& c, const PropertyTable& props)
         if (pr.win) hasWin = true;
     }
 
-    // 2) Effet WIN superposé
     if (hasYou && hasWin) {
         extern float g_time;
         draw_win_effect(x, y, g_time);

@@ -1,82 +1,95 @@
 /*
 ===============================================================================
-  grid.h — Représentation de la grille de jeu (moteur Baba Is You)
+  grid.h — Grille de jeu dynamique
 -------------------------------------------------------------------------------
   Rôle :
-    - Définir la structure de données centrale du moteur : la grille 2D.
-    - Chaque cellule peut contenir plusieurs objets (pile d’objets).
-    - Fournir des helpers pour accéder aux cellules et vérifier les limites.
-
-  Notes de conception :
-    - Le moteur Baba Is You repose sur une logique multi‑objets par case.
-      Exemple : une case peut contenir à la fois "BABA", "TEXT_IS", "TEXT_YOU".
-    - La grille est volontairement générique : aucune logique de règles ici.
-    - Le moteur de règles et le moteur de mouvement utilisent cette structure.
-
-  Extensions prévues :
-    - Support d’un système de couches (sol / objets / mots).
-    - Support d’un système de z‑index pour le rendu.
-    - Support d’un format de sérialisation pour l’éditeur de niveaux.
-
-  Auteur : Jean-Charles LEBEAU
-  Date   : Janvier 2026
+    - Représenter la grille logique d’un niveau.
+    - Stocker une matrice w×h de Cell, chaque Cell contenant plusieurs objets.
+    - Fournir un accès sécurisé aux cellules (lecture/écriture).
+    - Maintenir une zone jouable (playMinX/Y, playMaxX/Y) utilisée par :
+        * rules_parse()      → détection des limites du niveau
+        * update_camera()    → centrage caméra
+        * game_draw()        → optimisation du rendu
+    - Supporter des niveaux de tailles variables (niveaux normaux + custom).
 ===============================================================================
 */
 
 #pragma once
+
 #include <vector>
-#include <cstdint>
-#include "types.h"   // ObjectType, Properties, PropertyTable
+#include "core/types.h"
 
 namespace baba {
 
 // -----------------------------------------------------------------------------
-//  Constantes globales
-// -----------------------------------------------------------------------------
-constexpr int TILE_SIZE  = 16;
-constexpr int MAP_WIDTH  = 32;
-constexpr int MAP_HEIGHT = 24;
-constexpr int MAP_SIZE   = MAP_WIDTH * MAP_HEIGHT;
-
-// -----------------------------------------------------------------------------
-//  Objet individuel
+//  Un objet dans une cellule (type uniquement, pas de position locale)
 // -----------------------------------------------------------------------------
 struct Object {
     ObjectType type;
 };
 
 // -----------------------------------------------------------------------------
-//  Cellule de la grille (pile d’objets)
+//  Une cellule contient une pile d’objets superposés
 // -----------------------------------------------------------------------------
 struct Cell {
     std::vector<Object> objects;
 };
 
 // -----------------------------------------------------------------------------
-//  Grille complète
+//  Grille dynamique : structure centrale du moteur
 // -----------------------------------------------------------------------------
-struct Grid {
-    int width, height;
-    std::vector<Cell> cells;
+class Grid {
+public:
 
-    Grid(int w = MAP_WIDTH, int h = MAP_HEIGHT);
+    // -------------------------------------------------------------------------
+    //  Constructeur par défaut
+    //  Utilisé lors de l'initialisation de GameState (g_state.grid)
+    // -------------------------------------------------------------------------
+    Grid();
 
-    Cell&       cell(int x, int y);
-    const Cell& cell(int x, int y) const;
+    // -------------------------------------------------------------------------
+    //  Constructeur dynamique (w×h)
+    //  Crée une grille vide de dimensions réelles width × height
+    // -------------------------------------------------------------------------
+    Grid(int w, int h);
 
+    // -------------------------------------------------------------------------
+    //  Vérifie si (x,y) est dans les limites réelles du niveau
+    // -------------------------------------------------------------------------
     bool in_bounds(int x, int y) const;
 
-    int playMinX = 0, playMinY = 0;
-    int playMaxX = 0, playMaxY = 0;
+    // -------------------------------------------------------------------------
+    //  Accès aux cellules (lecture/écriture)
+    // -------------------------------------------------------------------------
+    Cell& cell(int x, int y);
+    const Cell& cell(int x, int y) const;
 
-    bool in_play_area(int x, int y) const {
-        return (x >= playMinX && x <= playMaxX &&
-                y >= playMinY && y <= playMaxY);
-    }
+    // -------------------------------------------------------------------------
+    //  Zone jouable (mise à jour par rules_parse)
+    //  Permet à la caméra et au rendu d’ignorer les marges vides
+    // -------------------------------------------------------------------------
+    bool in_play_area(int x, int y) const;
+
+    // Dimensions réelles du niveau
+    int width;
+    int height;
+
+    // Zone jouable (bornes min/max détectées par rules_parse)
+    int playMinX;
+    int playMaxX;
+    int playMinY;
+    int playMaxY;
+
+    // -------------------------------------------------------------------------
+    //  Contenu de la grille (public car utilisé par movement.cpp, rules.cpp,
+    //  game_draw(), etc.)
+    // -------------------------------------------------------------------------
+    std::vector<Cell> cells;
 };
 
 // -----------------------------------------------------------------------------
-//  Rendu d’une cellule
+//  draw_cell() — Dessine une cellule + effet WIN
+//  Implémentation dans grid.cpp
 // -----------------------------------------------------------------------------
 void draw_cell(int x, int y, const Cell& c, const PropertyTable& props);
 

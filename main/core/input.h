@@ -19,6 +19,7 @@
 */
 
 #pragma once
+#include "gb_common.h"
 #include <cstdint>
 
 // -----------------------------------------------------------------------------
@@ -54,6 +55,8 @@ extern Keys g_keys;
 // -----------------------------------------------------------------------------
 void input_init();          // Réinitialise l’état des entrées
 void input_poll(Keys& k);   // Lit les entrées et met à jour g_keys
+bool input_ready();			// anti répétitions
+
 
 // Helpers
 bool isLongPress(const Keys& k, int key);   // Détection pression longue (~1s)

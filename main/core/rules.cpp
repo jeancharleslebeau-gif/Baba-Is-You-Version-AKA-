@@ -1,35 +1,14 @@
 /*
 ===============================================================================
-  rules.cpp — Implémentation du moteur de règles
+  rules.cpp — Implémentation du moteur de règles (préparé pour AND)
 -------------------------------------------------------------------------------
-  Rôle :
-    - Scanner la grille pour détecter les triplets :
-          SUBJECT — IS — STATUS
-          SUBJECT — IS — SUBJECT   (transformations)
-    - Remplir :
-          * PropertyTable        (propriétés logiques : YOU, PUSH, STOP…)
-          * TransformSetTable    (transformations multiples : ROCK→WALL+FLAG)
-    - Gérer les règles horizontales et verticales.
-
-  Notes :
-    - Les règles composées (BABA IS YOU AND WIN) ne sont pas encore gérées.
-    - Les propriétés avancées (HOT/MELT, OPEN/SHUT, MOVE, FLOATING, PULL…)
-      sont appliquées dans movement.cpp.
-    - Les transformations sont appliquées via apply_transformations() :
-         * transformations multiples
-         * transformations en chaîne
-         * détection de cycles
-         * EMPTY IS X
-
-  Auteur : Jean-Charles LEBEAU
-  Date   : Janvier 2026
-===============================================================================
 */
 
 #include "rules.h"
 #include "types.h"
 #include "grid.h"
 #include <cstddef>
+#include <vector>
 
 namespace baba {
 
@@ -83,6 +62,10 @@ bool is_status_word(ObjectType t) {
     }
 }
 
+static bool is_and_word(ObjectType t) {
+    return t == ObjectType::Text_And;
+}
+
 // ============================================================================
 //  Conversion TEXT_* → objet physique
 // ============================================================================
@@ -101,7 +84,7 @@ ObjectType subject_to_object(ObjectType word) {
         case ObjectType::Text_Water: return ObjectType::Water;
         case ObjectType::Text_Ice:   return ObjectType::Ice;
         case ObjectType::Text_Box:   return ObjectType::Box;
-        default: return ObjectType::Empty;
+        default:                     return ObjectType::Empty;
     }
 }
 
@@ -136,13 +119,122 @@ void rules_reset(PropertyTable& props, TransformSetTable& sets) {
         props[i] = Properties{};
         sets[i].count = 0;
 
-        if (is_word((ObjectType)i))
-            props[i].push = true;
+        if (is_word((ObjectType)i)) {
+            props[i].push     = true;
+            props[i].floating = true;
+        }
     }
 }
 
 // ============================================================================
-//  Analyse des règles (propriétés + transformations multiples)
+//  Ajout d’une transformation
+// ============================================================================
+static void add_transform(TransformSetTable& sets,
+                          ObjectType subj, ObjectType target)
+{
+    if (subj == target)
+        return;
+
+    TransformSet& set = sets[(int)subj];
+
+    if (set.count >= 3)
+        return;
+
+    for (int i = 0; i < set.count; i++)
+        if (set.targets[i] == target)
+            return;
+
+    set.targets[set.count++] = target;
+}
+
+// ============================================================================
+//  Parsing d’une séquence de mots
+// ============================================================================
+static void process_word_sequence(const std::vector<ObjectType>& seq,
+                                  PropertyTable& props,
+                                  TransformSetTable& sets)
+{
+    if (seq.size() < 3)
+        return;
+
+    for (size_t isPos = 1; isPos + 1 < seq.size(); ++isPos) {
+        if (seq[isPos] != ObjectType::Text_Is)
+            continue;
+
+        // Sujets
+        std::vector<ObjectType> subjects;
+        {
+            size_t i = 0;
+            bool expectSubject = true;
+            while (i < isPos) {
+                ObjectType t = seq[i];
+                if (expectSubject) {
+                    if (!is_subject_word(t))
+                        break;
+                    subjects.push_back(t);
+                    expectSubject = false;
+                    ++i;
+                } else {
+                    if (!is_and_word(t))
+                        break;
+                    ++i;
+                    if (i >= isPos || !is_subject_word(seq[i]))
+                        break;
+                    subjects.push_back(seq[i]);
+                    ++i;
+                }
+            }
+            if (subjects.empty())
+                continue;
+        }
+
+        // Prédicats
+        std::vector<ObjectType> predicates;
+        {
+            size_t i = isPos + 1;
+            bool expectPred = true;
+            while (i < seq.size()) {
+                ObjectType t = seq[i];
+                if (expectPred) {
+                    if (!is_status_word(t) && !is_subject_word(t))
+                        break;
+                    predicates.push_back(t);
+                    expectPred = false;
+                    ++i;
+                } else {
+                    if (!is_and_word(t))
+                        break;
+                    ++i;
+                    if (i >= seq.size())
+                        break;
+                    ObjectType t2 = seq[i];
+                    if (!is_status_word(t2) && !is_subject_word(t2))
+                        break;
+                    predicates.push_back(t2);
+                    ++i;
+                }
+            }
+            if (predicates.empty())
+                continue;
+        }
+
+        // Application
+        for (auto subjWord : subjects) {
+            ObjectType subjObj = subject_to_object(subjWord);
+
+            for (auto predWord : predicates) {
+                if (is_status_word(predWord)) {
+                    apply_status(props[(int)subjObj], predWord);
+                } else if (is_subject_word(predWord)) {
+                    add_transform(sets, subjObj, subject_to_object(predWord));
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+//  Analyse des règles
 // ============================================================================
 void rules_parse(const Grid& g, PropertyTable& props, TransformSetTable& sets) {
     rules_reset(props, sets);
@@ -150,60 +242,91 @@ void rules_parse(const Grid& g, PropertyTable& props, TransformSetTable& sets) {
     int w = g.width;
     int h = g.height;
 
-    auto process = [&](ObjectType a, ObjectType b, ObjectType c){
-        if (b != ObjectType::Text_Is) return;
-        if (!is_subject_word(a)) return;
+    // -------------------------
+    // Scan horizontal
+    // -------------------------
+    for (int y = 0; y < h; ++y) {
+        std::vector<ObjectType> seq;
+        seq.reserve(w);
 
-        ObjectType subj = subject_to_object(a);
+        for (int x = 0; x < w; ++x) {
+            const auto& objs = g.cell(x, y).objects;
 
-        // SUBJECT IS STATUS
-        if (is_status_word(c)) {
-            apply_status(props[(int)subj], c);
-            return;
+            ObjectType word = ObjectType::Empty;
+            for (auto& o : objs) {
+                if ((is_word(o.type) && o.type != ObjectType::Text_Empty) ||
+                    o.type == ObjectType::Text_Is ||
+                    is_and_word(o.type))
+                {
+                    word = o.type;
+                    break;
+                }
+            }
+            seq.push_back(word);
         }
 
-        // SUBJECT IS SUBJECT (transformation multiple)
-        if (is_subject_word(c)) {
-            ObjectType target = subject_to_object(c);
-            if (target == subj) return;
-
-            TransformSet& set = sets[(int)subj];
-
-            if (set.count < 3) {
-                bool exists = false;
-                for (int i = 0; i < set.count; i++)
-                    if (set.targets[i] == target)
-                        exists = true;
-
-                if (!exists)
-                    set.targets[set.count++] = target;
+        std::vector<ObjectType> segment;
+        for (int x = 0; x < w; ++x) {
+            ObjectType t = seq[x];
+            if ((is_word(t) && t != ObjectType::Text_Empty) ||
+                t == ObjectType::Text_Is ||
+                is_and_word(t))
+            {
+                segment.push_back(t);
+            } else {
+                if (segment.size() >= 3)
+                    process_word_sequence(segment, props, sets);
+                segment.clear();
             }
         }
-    };
+        if (segment.size() >= 3)
+            process_word_sequence(segment, props, sets);
+    }
 
-    // Scan horizontal
-    for (int y = 0; y < h; y++)
-        for (int x = 0; x < w - 2; x++) {
-            auto& c0 = g.cell(x,   y).objects;
-            auto& c1 = g.cell(x+1, y).objects;
-            auto& c2 = g.cell(x+2, y).objects;
-            if (!c0.empty() && !c1.empty() && !c2.empty())
-                process(c0[0].type, c1[0].type, c2[0].type);
-        }
-
+    // -------------------------
     // Scan vertical
-    for (int y = 0; y < h - 2; y++)
-        for (int x = 0; x < w; x++) {
-            auto& c0 = g.cell(x,   y).objects;
-            auto& c1 = g.cell(x, y+1).objects;
-            auto& c2 = g.cell(x, y+2).objects;
-            if (!c0.empty() && !c1.empty() && !c2.empty())
-                process(c0[0].type, c1[0].type, c2[0].type);
+    // -------------------------
+    for (int x = 0; x < w; ++x) {
+        std::vector<ObjectType> seq;
+        seq.reserve(h);
+
+        for (int y = 0; y < h; ++y) {
+            const auto& objs = g.cell(x, y).objects;
+
+            ObjectType word = ObjectType::Empty;
+            for (auto& o : objs) {
+                if ((is_word(o.type) && o.type != ObjectType::Text_Empty) ||
+                    o.type == ObjectType::Text_Is ||
+                    is_and_word(o.type))
+                {
+                    word = o.type;
+                    break;
+                }
+            }
+            seq.push_back(word);
         }
+
+        std::vector<ObjectType> segment;
+        for (int y = 0; y < h; ++y) {
+            ObjectType t = seq[y];
+            if ((is_word(t) && t != ObjectType::Text_Empty) ||
+                t == ObjectType::Text_Is ||
+                is_and_word(t))
+            {
+                segment.push_back(t);
+            } else {
+                if (segment.size() >= 3)
+                    process_word_sequence(segment, props, sets);
+                segment.clear();
+            }
+        }
+        if (segment.size() >= 3)
+            process_word_sequence(segment, props, sets);
+    }
 }
 
 // ============================================================================
-//  Résolution des chaînes + détection de cycles
+//  Résolution des chaînes + cycles
 // ============================================================================
 static ObjectType resolve_chain(const TransformSetTable& sets, ObjectType start) {
     bool visited[(int)ObjectType::Count] = {false};
@@ -212,7 +335,7 @@ static ObjectType resolve_chain(const TransformSetTable& sets, ObjectType start)
     while (true) {
         int idx = (int)cur;
         if (visited[idx])
-            return start; // cycle → on garde l’original
+            return start;
 
         visited[idx] = true;
 
@@ -220,12 +343,12 @@ static ObjectType resolve_chain(const TransformSetTable& sets, ObjectType start)
         if (s.count == 0)
             return cur;
 
-        cur = s.targets[0]; // première cible = cible principale
+        cur = s.targets[0];
     }
 }
 
 // ============================================================================
-//  Application des transformations multiples + EMPTY IS X
+//  Application des transformations
 // ============================================================================
 void apply_transformations(Grid& g, const TransformSetTable& sets) {
     int w = g.width;
@@ -245,11 +368,9 @@ void apply_transformations(Grid& g, const TransformSetTable& sets) {
                 if (s.count == 0)
                     continue;
 
-                // Résolution de chaîne + cycle
                 ObjectType resolved = resolve_chain(sets, t);
                 obj.type = resolved;
 
-                // Transformations multiples → duplication
                 for (int i = 1; i < s.count; i++) {
                     Object copy = obj;
                     copy.type = s.targets[i];
@@ -262,10 +383,10 @@ void apply_transformations(Grid& g, const TransformSetTable& sets) {
         }
 
     // EMPTY IS X
-    ObjectType emptyTarget =
-        (sets[(int)ObjectType::Empty].count > 0)
-            ? sets[(int)ObjectType::Empty].targets[0]
-            : ObjectType::Empty;
+    ObjectType emptyTarget = ObjectType::Empty;
+    if (sets[(int)ObjectType::Empty].count > 0) {
+        emptyTarget = resolve_chain(sets, ObjectType::Empty);
+    }
 
     if (emptyTarget != ObjectType::Empty) {
         for (int y = 0; y < h; y++)

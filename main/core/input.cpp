@@ -16,6 +16,10 @@
 
 #include "core/input.h"
 #include "gb_core.h"
+#include "gb_common.h"
+#include "esp_timer.h"
+#include <stdint.h>
+#include <chrono>
 
 // gb_core global défini dans gb_core.cpp
 extern gb_core g_core;
@@ -28,6 +32,34 @@ static uint16_t prev_raw = 0;
 
 // Compteurs pour pressions longues (un par bit)
 static int longPressCounter[16] = {};
+
+// -----------------------------------------------------------------------------
+// Helper front montant pour B (optionnel mais pratique)
+// -----------------------------------------------------------------------------
+static inline bool pressed_B(const Keys& k)
+{
+    return k.pressed & GB_KEY_B;
+}
+
+
+// ============================================================================
+//  Anti-repeat
+// ============================================================================
+
+static uint32_t lastInputTime = 0;
+static const uint32_t INPUT_COOLDOWN_MS = 120;
+
+static uint32_t get_time_ms() {
+    return esp_timer_get_time() / 1000;
+}
+
+bool input_ready() {
+    uint32_t now = get_time_ms();
+    if (now - lastInputTime < INPUT_COOLDOWN_MS)
+        return false;
+    lastInputTime = now;
+    return true;
+}
 
 
 // -----------------------------------------------------------------------------
@@ -73,21 +105,37 @@ void input_poll(Keys& k)
     k.R1    = raw & GB_KEY_R1;
     k.L1    = raw & GB_KEY_L1;
 
-    // 4) Joystick analogique
-    k.joxx = g_core.joystick.get_x();  // [-2000, +2000]
-    k.joxy = g_core.joystick.get_y();
+	// 4) Joystick analogique
+	k.joxx = g_core.joystick.get_x();  // [0, 4095]
+	k.joxy = g_core.joystick.get_y();  // [0, 4095]
 
-    // 5) Joystick numérique
-    constexpr int THRESH = 500;
+	// 5) Joystick numérique (centré)
+	constexpr int CENTER_X = 1915;
+	constexpr int CENTER_Y = 1950;
+	constexpr int DEADZONE = 400;   // tolérance autour du centre
 
-    k.joyX = (k.joxx < -THRESH) ? -1 :
-             (k.joxx >  THRESH) ? +1 : 0;
+	int dx = k.joxx - CENTER_X;
+	int dy = k.joxy - CENTER_Y;
 
-    k.joyY = (k.joxy < -THRESH) ? -1 :
-             (k.joxy >  THRESH) ? +1 : 0;
+	// X
+	if (dx < -DEADZONE)      k.joyX = -1;
+	else if (dx > DEADZONE)  k.joyX = +1;
+	else                     k.joyX = 0;
+
+	// Y 
+	if (dy < -DEADZONE)      k.joyY = +1;   // bas
+	else if (dy > DEADZONE)  k.joyY = -1;   // haut
+	else                     k.joyY = 0;
 
     // 6) Mise à jour globale
     g_keys = k;
+	g_keys.raw = k.raw;
+	g_keys.A |= k.A;
+	g_keys.B |= k.B;
+	g_keys.C |= k.C;
+	g_keys.D |= k.D;
+	g_keys.pressed |= k.pressed;
+
 }
 
 

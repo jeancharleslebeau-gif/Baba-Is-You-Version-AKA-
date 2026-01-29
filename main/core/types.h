@@ -7,26 +7,11 @@ namespace baba {
 // ============================================================================
 //  Types d'objets du jeu
 // ============================================================================
-enum class ObjectType : uint8_t {
-    Empty = 0,
+enum class ObjectType {
+    // objets physiques…
+    Baba, Wall, Rock, Flag, Lava, Goop, Love, Empty, Key, Door, Water, Ice, Box,
 
-    // Objets physiques
-    Baba,
-    Wall,
-    Rock,
-    Flag,
-    Lava,
-    Goop,
-    Love,
-
-    // Nouveaux objets simples
-    Key,
-    Door,
-    Water,
-    Ice,
-    Box,
-
-    // Mots (noms)
+    // mots
     Text_Baba,
     Text_Wall,
     Text_Rock,
@@ -35,16 +20,14 @@ enum class ObjectType : uint8_t {
     Text_Goop,
     Text_Love,
     Text_Empty,
-
-    // Nouveaux mots (noms)
     Text_Key,
     Text_Door,
     Text_Water,
     Text_Ice,
     Text_Box,
-
-    // Mots (verbes / propriétés)
     Text_Is,
+    Text_And, 
+
     Text_Push,
     Text_Stop,
     Text_Win,
@@ -62,6 +45,7 @@ enum class ObjectType : uint8_t {
 
     Count
 };
+
 
 // ============================================================================
 //  Propriétés logiques appliquées aux objets
@@ -105,6 +89,10 @@ struct TransformSet {
     uint8_t count = 0;
     ObjectType targets[3];
 };
+
+const char* object_type_to_text(ObjectType t);
+ObjectType parse_object_type(const char* name);
+
 
 using TransformSetTable = std::array<TransformSet, (int)ObjectType::Count>;
 
