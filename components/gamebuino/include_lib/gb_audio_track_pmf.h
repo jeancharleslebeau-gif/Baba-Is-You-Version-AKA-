@@ -43,9 +43,18 @@ class gb_audio_track_pmf : public gb_audio_track_base {
         uint32_t position() override;
             // implement of derivated class to return true if playing currently in progress
         uint32_t length( ) override;
-
                 // return playing state
         bool is_playing();
+
+            // pmf specifics
+            // return count of playback channels according current pfm file.
+        uint8_t get_pmf_channels_count() {
+            return _pmf_player.num_playback_channels();
+        }
+            // return track info for requested channel 
+        pmf_channel_info get_pmf_channel_info(uint8_t channel_idx) {
+            return _pmf_player.channel_info(channel_idx);
+        }
 
     private:
         pmf_player _pmf_player;

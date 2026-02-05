@@ -61,6 +61,8 @@ void lcd_refresh();
 uint32_t gb_ll_lcd_get_draw_count();
 
 void lcd_clear( uint16_t u16_pix_color );
+	// shift all pixels by ryght ( fade off )
+void lcd_dpo();
     // return !0 if last refresh completed
 uint8_t lcd_refresh_completed();
 void lcd_putpixel( uint16_t x, uint16_t y, gb_pixel color );
@@ -69,7 +71,7 @@ gb_pixel lcd_getpixel( uint16_t x, uint16_t y);
 void lcd_update_pwm(uint16_t u16_duty);
 
     // RGB 888 to rgb 565
-inline uint16_t lcd_colopr_rgb( uint8_t red, uint8_t green, uint8_t blue )
+inline uint16_t lcd_color_rgb( uint8_t red, uint8_t green, uint8_t blue )
 {
     return ( red>>3 ) | ((green>>2)<<5) | ((blue>>3)<<(5+6)) ;
 //    return 0x1f; // red

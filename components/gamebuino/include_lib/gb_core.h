@@ -26,21 +26,6 @@ Authors:
 
 #pragma once
 
-class gb_joystick {
-    public:
-            //! update status of joystick
-        void update();
-            //! Joystick vertical position, from -1000 to 1000
-        int16_t get_y();
-            //! Joystick horizontal position, from -1000 to 1000
-        int16_t get_x();
-    private:
-        int16_t i16_joy_x {0};
-        int16_t i16_joy_y {0};
-
-};
-
-
 class gb_buttons {
     public:
         enum gb_key { KEY_RUN=GB_KEY_RUN, KEY_MENU=GB_KEY_MENU,
@@ -61,6 +46,56 @@ class gb_buttons {
         bool released(gb_key key);
 
     private:
+        uint16_t u16_buttons {0};
+        uint16_t u16_buttons_last {0};
+
+};
+
+
+class gb_joystick {
+    public:
+            //! update status of joystick
+        void update();
+            //! Joystick vertical position, from -1000 to 1000
+        int16_t get_y();
+            //! Joystick horizontal position, from -1000 to 1000
+        int16_t get_x();
+
+            //! D-Pad emulation on joystick : return buttons state, cf gb_buttons::KEY_xxx
+        uint16_t state();
+            //! D-Pad emulation on joystick : return buttons press event, cf gb_buttons::KEY_xxx
+        uint16_t pressed();
+            //! D-Pad emulation on joystick : return true if requested button presse, cf gb_buttons::KEY_xxx
+        bool pressed(gb_buttons::gb_key key);
+            //! D-Pad emulation on joystick : return buttons release event, cf gb_buttons::KEY_xxx
+        uint16_t released();
+            //! D-Pad emulation on joystick : return true if requested button released, cf gb_buttons::KEY_xxx
+        bool released(gb_buttons::gb_key key);
+
+            //! Joystick horizontal integral position, like a mouse
+        float get_posx();
+            //! Joystick vertical integral position, like a mouse
+        float get_posy();
+            //! calibrage center position
+        void calibrate_center();
+            //! set X Joystick position range, like a mouse. Set fmin=0 and fmax=0 to disable feature ( default )
+        void set_posx_range( float fmin, float fmax );
+            //! set Y Joystick position range, like a mouse. Set fmin=0 and fmax=0 to disable feature ( default )
+        void set_posy_range( float fmin, float fmax );
+            //! set XY Joystick integral dispacment speed in pix/seconds ( default = 500 )
+        void set_posxy_speed( float fspeed );
+            //! set XY Joystick integral position ( default = center of screen )
+        void set_posxy( float posx, float posy );
+
+    private:
+        int16_t i16_joy_x {0}; int16_t i16_joy_y {0};
+        int32_t i32_joy_center_x {JOYX_MID};
+        int32_t i32_joy_center_y {JOYX_MID};
+        float f32_joy_pos_x{160}; float f32_joy_pos_x_min{0}; float f32_joy_pos_x_max{319};
+        float f32_joy_pos_y{120}; float f32_joy_pos_y_min{0}; float f32_joy_pos_y_max{240};
+        float f32_joy_speed_xy{500.0}; // joy speed, default : up to 500 pix/sec
+        uint32_t u32_last_update{0}; // last update date in ms
+            // DPad emulation
         uint16_t u16_buttons {0};
         uint16_t u16_buttons_last {0};
 

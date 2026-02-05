@@ -17,7 +17,7 @@
 ===============================================================================
 */
 
-#include "sprites.h"
+#include "core/sprites.h"
 #include "core/graphics.h"
 #include "assets/gfx/atlas.h"
 #include <cstdio>

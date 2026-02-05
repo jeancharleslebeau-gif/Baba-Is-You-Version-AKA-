@@ -318,7 +318,7 @@ uint16_t pmf_player::playlist_length() const
   return m_pmf_file?pgm_read_word(m_pmf_file+pmfcfg_offset_playlist_length):0;
 }
 //---------------------------------------------------------------------------
-//#include <stdio.h>
+
 void pmf_player::start(uint32_t sampling_freq_, uint16_t playlist_pos_)
 {
   // initialize channels
@@ -340,11 +340,9 @@ void pmf_player::start(uint32_t sampling_freq_, uint16_t playlist_pos_)
   m_num_processed_pattern_channels=MIN(m_num_pattern_channels, m_num_playback_channels);
   init_pattern(playlist_pos_<playlist_len?playlist_pos_:0);
   m_speed=pgm_read_byte(m_pmf_file+pmfcfg_offset_init_speed);
-//  printf("File speed %d\n", m_speed );
   m_note_period_min=pgm_read_word(m_pmf_file+pmfcfg_offset_note_period_min);
   m_note_period_max=pgm_read_word(m_pmf_file+pmfcfg_offset_note_period_max);
   m_num_batch_samples=(m_sampling_freq*125)/long(pgm_read_byte(m_pmf_file+pmfcfg_offset_init_tempo)*50);
-//  printf("File tempo %d\n", pgm_read_byte(m_pmf_file+pmfcfg_offset_init_tempo) );
   m_current_row_tick=m_speed-1;
   m_arpeggio_counter=0;
   m_pattern_delay=1;
@@ -805,7 +803,10 @@ int16_t pmf_player::get_sample_speed(uint16_t note_period_, bool forward_)
     speed=int16_t((8363.0f*8.0f/m_sampling_freq)*fast_exp2(float(7680-note_period_)/768.0f)+0.5f);
   else
     speed=int16_t((7093789.2f*256.0f/m_sampling_freq)/note_period_+0.5f);
-  return forward_?speed:-speed;
+  int16_t i16_speed = forward_?speed:-speed;
+  if (i16_speed<0)  // 2026/01/31/JMP : don't return negative sample speed : seek in reverse in sample tab will cause crash
+    return -i16_speed;
+  return i16_speed;
 }
 //----
 
@@ -888,13 +889,11 @@ void pmf_player::hit_note(audio_channel &chl_, uint8_t note_idx_, uint8_t sample
     chl_.fxmem_vibrato_pos=0;
 }
 //----
-//#include <stdio.h>
 void pmf_player::process_pattern_row()
 {
   // store current track positions
   const uint8_t *current_track_poss[pmfplayer_max_channels];
   uint8_t current_track_bit_poss[pmfplayer_max_channels];
-//  printf( "m_num_processed_pattern_channels = %d\n", m_num_processed_pattern_channels );
   for(uint8_t ci=0; ci<m_num_processed_pattern_channels; ++ci)
   {
     audio_channel &chl=m_channels[ci];

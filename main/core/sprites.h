@@ -33,6 +33,9 @@ struct SpriteRect {
 // Initialise la table de correspondance ObjectType → sprite
 void sprites_init();
 
+// Accès direct aux pixels de l’atlas (RGB565)
+const uint16_t* getAtlasPixels();
+
 // Retourne le rectangle source pour un ObjectType
 SpriteRect sprite_rect_for(ObjectType type);
 

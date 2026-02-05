@@ -92,5 +92,7 @@ public:
 //  Implémentation dans grid.cpp
 // -----------------------------------------------------------------------------
 void draw_cell(int x, int y, const Cell& c, const PropertyTable& props);
+void draw_cell_scaled(int x, int y, const Cell& c, const PropertyTable& props, int scale_fp);
+
 
 } // namespace baba

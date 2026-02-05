@@ -63,7 +63,7 @@
 #include "tasks/task_input.h"
 #include "tasks/task_audio.h"
 
-extern gb_core g_core;
+gb_core g_core;
 
 
 void hardware_init()
@@ -145,16 +145,6 @@ extern "C" void app_main(void)
         1 // Core 0 : idéal pour l’audio (I2S + DMA)
     );
 
-    // Tâche input (lecture boutons)
-    xTaskCreatePinnedToCore(
-        baba::task_input,
-        "InputTask",
-        4096,
-        nullptr,
-        3,
-        nullptr,
-        0 // Core 0
-    );
 
     // Tâche principale du jeu (40 FPS)
     xTaskCreatePinnedToCore(

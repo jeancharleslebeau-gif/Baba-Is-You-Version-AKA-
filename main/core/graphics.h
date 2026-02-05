@@ -69,6 +69,38 @@ void gfx_blitRegion(
     int dstX, int dstY
 );
 
+// ============================================================================
+//  Blit d’une région rectangulaire avec scaling (Q8.8)
+// ----------------------------------------------------------------------------
+//  - Identique à gfx_blitRegion(), mais applique un zoom nearest-neighbor.
+//  - scale_fp = facteur de zoom en Q8.8 (256 = 1.0).
+//  - Utilisé pour le zoom de la grille (BabaIsU).
+// ============================================================================
+void gfx_blitRegionScaled(
+    const uint16_t* atlas,
+    int atlasW,
+    int srcX, int srcY,
+    int srcW, int srcH,
+    int dstX, int dstY,
+    int scale_fp
+);
+
+
+// ============================================================================
+//  Blit d’un bitmap arbitraire avec scaling (Q8.8)
+// ----------------------------------------------------------------------------
+//  - Version zoomée de gfx_blit().
+//  - pixels = image brute RGB565 (srcW × srcH).
+//  - scale_fp = facteur de zoom en Q8.8 (256 = 1.0).
+// ============================================================================
+void gfx_blitScaled(
+    const uint16_t* pixels,
+    int srcW, int srcH,
+    int dstX, int dstY,
+    int scale_fp
+);
+
+
 
 // ============================================================================
 //  Texte (font8x8)

@@ -19,6 +19,7 @@
 #include "game/game.h"
 #include "options.h"
 #include "assets/gfx/title.h"
+extern gb_core g_core;
 
 namespace baba {
 
@@ -38,17 +39,16 @@ void menu_init() {
 //  Mise à jour (navigation)
 // -----------------------------------------------------------------------------
 void menu_update() {
-    const Keys& k = g_keys;
 
     const int count = 3; // Jouer / Options / Quitter
 
-    if (k.up)
+    if ( g_core.buttons.pressed(gb_buttons::KEY_UP) )
         cursor = (cursor + count - 1) % count;
 
-    if (k.down)
+    if ( g_core.buttons.pressed(gb_buttons::KEY_DOWN) )
         cursor = (cursor + 1) % count;
 
-    if (k.A) {
+    if ( g_core.buttons.pressed(gb_buttons::KEY_A) ) {
         if (cursor == 0) {
             // Jouer → charger niveau 0
             game_load_level(0);

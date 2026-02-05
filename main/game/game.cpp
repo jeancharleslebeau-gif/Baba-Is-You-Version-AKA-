@@ -41,9 +41,12 @@
 
 #include "assets/gfx/title.h"
 
-
 #include <algorithm>
 #include <vector>
+#include <cmath>
+
+#include <gamebuino.h>
+extern gb_core g_core;
 
 namespace baba {
 
@@ -53,12 +56,11 @@ namespace baba {
 GameState g_state;
 static GameMode  g_mode = GameMode::Menu;
 
-// Son global ON/OFF (toggle avec D en gameplay)
 bool soundEnabled = true;
 
-// Musique forcée (choisie dans options.cpp)
 static MusicID g_forcedMusic = MusicID::NONE;
 static bool    g_forceMusicAcrossLevels = false;
+
 std::vector<GameSnapshot> g_undoStack;
 
 GameState& game_state() { return g_state; }
@@ -90,13 +92,39 @@ struct Camera {
 
 static Camera g_camera;
 
-constexpr int VIEW_TILES_W  = SCREEN_W / TILE_SIZE;
-constexpr int VIEW_TILES_H  = SCREEN_H / TILE_SIZE;
-
 struct Point { int x; int y; };
 static int g_selectedYou = 0;
 
-// Trouve toutes les positions YOU
+// ============================================================================
+//  Zoom (Q8.8) — niveaux : 20, 15, 10, 8, 6 tiles visibles
+// ============================================================================
+static const int ZOOM_FP_LEVELS[] = {
+    256, // 1.0  → 20 tiles
+    341, // 1.33 → 15 tiles
+    512, // 2.0  → 10 tiles
+    640, // 2.5  → 8 tiles
+    853  // 3.33 → 6 tiles
+};
+static constexpr int ZOOM_LEVEL_COUNT = sizeof(ZOOM_FP_LEVELS) / sizeof(int);
+
+static int g_zoomIndex = 0;
+static int g_zoomFp    = ZOOM_FP_LEVELS[0];
+
+static int view_tiles_w()
+{
+    int tiles = (SCREEN_W << 8) / (TILE_SIZE * g_zoomFp);
+    return tiles > 0 ? tiles : 1;
+}
+
+static int view_tiles_h()
+{
+    int tiles = (SCREEN_H << 8) / (TILE_SIZE * g_zoomFp);
+    return tiles > 0 ? tiles : 1;
+}
+
+// ============================================================================
+//  YOU detection
+// ============================================================================
 static std::vector<Point> find_all_you(const Grid& g, const PropertyTable& props) {
     std::vector<Point> out;
 
@@ -109,7 +137,6 @@ static std::vector<Point> find_all_you(const Grid& g, const PropertyTable& props
     return out;
 }
 
-// Cible caméra = YOU sélectionné ou centre de masse
 static Point compute_camera_target(const Grid& g, const PropertyTable& props) {
     auto yous = find_all_you(g, props);
 
@@ -124,47 +151,52 @@ static Point compute_camera_target(const Grid& g, const PropertyTable& props) {
     return {int(sx / yous.size()), int(sy / yous.size())};
 }
 
-// Mise à jour caméra
-static void update_camera(const Grid& g, const PropertyTable& props, int joyX, int joyY)
+// ============================================================================
+//  Mise à jour caméra (compatible zoom)
+// ============================================================================
+static void update_camera(const Grid& g, const PropertyTable& props,
+                          int joyX, int joyY)
 {
-    Point target = compute_camera_target(g, props);
+    const int vw = view_tiles_w();
+    const int vh = view_tiles_h();
 
-    float idealX = target.x - (VIEW_TILES_W / 2.0f);
-    float idealY = target.y - (VIEW_TILES_H / 2.0f);
+    float camX = g_camera.x;
+    float camY = g_camera.y;
 
-    const float joyFactor = 0.3f;
-    g_camera.offsetX += joyX * joyFactor;
-    g_camera.offsetY += joyY * joyFactor;
+    // Déplacement fluide (tiles / seconde)
+    const float camSpeed = 5.0f; // ajustable
+    float dt = 1.0f / 60.0f;     // si tu as un vrai delta, remplace ici
 
-    float camX = idealX + g_camera.offsetX;
-    float camY = idealY + g_camera.offsetY;
+    // Déplacement progressif
+    camX += joyX * camSpeed * dt;
+    camY += joyY * camSpeed * dt;
 
+    // Limites du niveau
     float levelW = g.playMaxX - g.playMinX + 1;
     float levelH = g.playMaxY - g.playMinY + 1;
 
-    // Clamp horizontal
-    if (levelW < VIEW_TILES_W) {
-        camX = g.playMinX - (VIEW_TILES_W - levelW) * 0.5f;
+    // Horizontal
+    if (levelW <= vw) {
+        camX = g.playMinX - (vw - levelW) * 0.5f;
     } else {
         camX = std::clamp(camX,
                           (float)g.playMinX,
-                          (float)(g.playMaxX - VIEW_TILES_W + 1));
+                          (float)(g.playMaxX - vw + 1));
     }
 
-    // Clamp vertical
-    if (levelH < VIEW_TILES_H) {
-        camY = g.playMinY - (VIEW_TILES_H - levelH) * 0.5f;
+    // Vertical
+    if (levelH <= vh) {
+        camY = g.playMinY - (vh - levelH) * 0.5f;
     } else {
         camY = std::clamp(camY,
                           (float)g.playMinY,
-                          (float)(g.playMaxY - VIEW_TILES_H + 1));
+                          (float)(g.playMaxY - vh + 1));
     }
 
-	// Forcer la caméra à être alignée sur la grille
-	g_camera.x = static_cast<int>(camX);
-	g_camera.y = static_cast<int>(camY);
-
+    g_camera.x = camX;
+    g_camera.y = camY;
 }
+
 
 // ============================================================================
 //  Transitions
@@ -220,33 +252,28 @@ void ensure_custom_level_structure()
         &levels[2]
     };
 
-	for (int i = 0; i < 3; ++i) {
-		if (!fs_exists(paths[i])) {
+    for (int i = 0; i < 3; ++i) {
+        if (!fs_exists(paths[i])) {
 
-			std::string out;
+            std::string out;
 
-			for (int y = 0; y < defaults[i]->height; ++y) {
-				for (int x = 0; x < defaults[i]->width; ++x) {
+            for (int y = 0; y < defaults[i]->height; ++y) {
+                for (int x = 0; x < defaults[i]->width; ++x) {
 
-					// --- Récupération brute depuis levels_data (uint8_t) ---
-					uint8_t raw = defaults[i]->data[y * defaults[i]->width + x];
+                    uint8_t raw = defaults[i]->data[y * defaults[i]->width + x];
+                    ObjectType obj = static_cast<ObjectType>(raw);
 
-					// --- Conversion propre vers ObjectType ---
-					ObjectType obj = static_cast<ObjectType>(raw);
+                    out += object_type_to_text(obj);
 
-					// --- Conversion ObjectType → texte ---
-					out += object_type_to_text(obj);
+                    if (x + 1 < defaults[i]->width)
+                        out += ", ";
+                }
+                out += "\n";
+            }
 
-					if (x + 1 < defaults[i]->width)
-						out += ", ";
-				}
-				out += "\n";
-			}
-
-			fs_write_text(paths[i], out.c_str());
-		}
-	}
-
+            fs_write_text(paths[i], out.c_str());
+        }
+    }
 }
 
 // ============================================================================
@@ -260,7 +287,7 @@ void game_init() {
     sprites_init();
 
     g_mode = GameMode::Menu;
-	menu_init();
+    menu_init();
 }
 
 // ============================================================================
@@ -268,70 +295,50 @@ void game_init() {
 // ============================================================================
 void game_load_level(int index)
 {
+    g_undoStack.clear();
+
     g_state.currentLevel = index;
     g_state.hasWon = false;
     g_state.hasDied = false;
 
-    // -------------------------------------------------------------------------
-    // 1) Charger la grille (niveaux normaux ou custom)
-    // -------------------------------------------------------------------------
     if (index <= -1 && index >= -3) {
-        // Niveaux custom : index = -1, -2, -3 → slots 0,1,2
         int slot = -1 - index;
         std::string text;
 
         if (fs_read_text(CUSTOM_SLOTS[slot], text)) {
-            // Charge depuis texte
             load_level_from_text(text.c_str(), g_state.grid);
         } else {
-            // Slot vide → fallback sur niveau 0
             load_level(0, g_state.grid);
         }
     } else {
-        // Niveau normal
         load_level(index, g_state.grid);
     }
 
-    // -------------------------------------------------------------------------
-    // 2) Recalculer les règles + transformations
-    // -------------------------------------------------------------------------
     rules_parse(g_state.grid, g_state.props, g_state.transforms);
     apply_transformations(g_state.grid, g_state.transforms);
 
-    // -------------------------------------------------------------------------
-    // 3) Réinitialiser la caméra et la sélection
-    // -------------------------------------------------------------------------
     g_camera = Camera{};
     g_selectedYou = 0;
 
-    // -------------------------------------------------------------------------
-    // 4) Gestion de la musique
-    // -------------------------------------------------------------------------
     MusicID music = MusicID::NONE;
 
     if (g_forcedMusic != MusicID::NONE) {
-        // Musique forcée via options
         music = g_forcedMusic;
 
         if (!g_forceMusicAcrossLevels)
             g_forcedMusic = MusicID::NONE;
 
     } else {
-        // Musique par défaut du niveau
         music = getMusicForLevel(index);
     }
 
     audio_request_music(music);
 
-    // -------------------------------------------------------------------------
-    // 5) Mise à jour caméra initiale
-    // -------------------------------------------------------------------------
     update_camera(g_state.grid, g_state.props, 0, 0);
 }
 
-
 // ============================================================================
-//  ÉCRAN DE TITRE (GameMode::Menu)
+//  ÉCRAN DE TITRE
 // ============================================================================
 void game_show_title()
 {
@@ -341,10 +348,13 @@ void game_show_title()
 }
 
 // ============================================================================
-//  game_update() — uniquement gameplay + redirection vers options
+//  game_update()
 // ============================================================================
 void game_update() {
 
+    // =========================================================================
+    //  Modes spéciaux (OPTIONS / MENU)
+    // =========================================================================
     if (g_mode == GameMode::Options) {
         options_update();
         return;
@@ -355,27 +365,62 @@ void game_update() {
         return;
     }
 
+    // =========================================================================
+    //  Réinitialisation état de frame
+    // =========================================================================
     g_state.hasWon  = false;
     g_state.hasDied = false;
 
-    // --- Toggle son global (D) ---
-    if (g_keys.D) {
-        printf("D DETECTED\n");
-        soundEnabled = !soundEnabled;
-        options_save();
-
-        if (soundEnabled) {
-            audio_set_music_volume(g_audio_settings.music_volume);
-            audio_set_sfx_volume(g_audio_settings.sfx_volume);
-        } else {
-            audio_set_music_volume(0);
-            audio_set_sfx_volume(0);
+    // =========================================================================
+    //  Zoom (L1 / R1)
+    // =========================================================================
+    if (g_core.buttons.pressed(gb_buttons::KEY_L1)) {
+        if (g_zoomIndex > 0) {
+            g_zoomIndex--;
+            g_zoomFp = ZOOM_FP_LEVELS[g_zoomIndex];
         }
     }
 
-    // --- UNDO (C) ---
-    if (g_keys.C && !g_undoStack.empty()) {
-        printf("C DETECTED IN\n");
+    if (g_core.buttons.pressed(gb_buttons::KEY_R1)) {
+        if (g_zoomIndex + 1 < ZOOM_LEVEL_COUNT) {
+            g_zoomIndex++;
+            g_zoomFp = ZOOM_FP_LEVELS[g_zoomIndex];
+        }
+    }
+
+    // =========================================================================
+    //  Bouton D : recentrer ou changer de YOU
+    // =========================================================================
+    if (g_core.buttons.pressed(gb_buttons::KEY_D)) {
+
+        Point target = compute_camera_target(g_state.grid, g_state.props);
+
+        const int vw = view_tiles_w();
+        const int vh = view_tiles_h();
+
+        float idealX = target.x - vw * 0.5f;
+        float idealY = target.y - vh * 0.5f;
+
+        // Si la caméra n'est pas centrée → on centre
+        if (fabsf(g_camera.x - idealX) > 0.1f ||
+            fabsf(g_camera.y - idealY) > 0.1f)
+        {
+            g_camera.x = idealX;
+            g_camera.y = idealY;
+        }
+        else {
+            // Sinon → on passe au YOU suivant
+            auto yous = find_all_you(g_state.grid, g_state.props);
+            if (!yous.empty()) {
+                g_selectedYou = (g_selectedYou + 1) % yous.size();
+            }
+        }
+    }
+
+    // =========================================================================
+    //  UNDO (C)
+    // =========================================================================
+    if (g_core.buttons.pressed(gb_buttons::KEY_C) && !g_undoStack.empty()) {
 
         const GameSnapshot& snap = g_undoStack.back();
         g_state.grid       = snap.grid;
@@ -389,22 +434,25 @@ void game_update() {
         return;
     }
 
-    // --- Toujours recalculer les règles AVANT mouvement ---
+    // =========================================================================
+    //  Pipeline règles + transformations
+    // =========================================================================
     rules_parse(g_state.grid, g_state.props, g_state.transforms);
     apply_transformations(g_state.grid, g_state.transforms);
 
-    // --- Lecture du mouvement (sans else-if) ---
+    // =========================================================================
+    //  Déplacement du joueur (flèches)
+    // =========================================================================
     int dx = 0, dy = 0;
 
-    if (g_keys.left)  dx = -1;
-    if (g_keys.right) dx = +1;
-    if (g_keys.up)    dy = -1;
-    if (g_keys.down)  dy = +1;
+    if (g_core.buttons.pressed(gb_buttons::KEY_LEFT))  dx = -1;
+    if (g_core.buttons.pressed(gb_buttons::KEY_RIGHT)) dx = +1;
+    if (g_core.buttons.pressed(gb_buttons::KEY_UP))    dy = -1;
+    if (g_core.buttons.pressed(gb_buttons::KEY_DOWN))  dy = +1;
 
-    // --- Mouvement ---
     if (dx != 0 || dy != 0) {
 
-        // Sauvegarde UNDO
+        // --- Sauvegarde UNDO ---
         if (g_undoStack.size() >= MAX_UNDO)
             g_undoStack.erase(g_undoStack.begin());
 
@@ -414,6 +462,7 @@ void game_update() {
             g_state.transforms
         });
 
+        // --- Application du mouvement ---
         MoveResult r = step(g_state.grid, g_state.props, g_state.transforms, dx, dy);
 
         g_state.hasWon  = r.hasWon;
@@ -429,13 +478,32 @@ void game_update() {
             return;
         }
 
-        // Recalcul des règles après mouvement
         rules_parse(g_state.grid, g_state.props, g_state.transforms);
         apply_transformations(g_state.grid, g_state.transforms);
     }
 
-    update_camera(g_state.grid, g_state.props, g_keys.joyX, g_keys.joyY);
+    // =========================================================================
+    //  Joystick → déplacement caméra (normalisé)
+    // =========================================================================
+    int rawX = g_core.joystick.get_x();   // -128 → +127
+    int rawY = g_core.joystick.get_y();   // -128 → +127
+
+    const int dead = 25;
+
+    int joyX = 0;
+    int joyY = 0;
+
+    if (rawX >  dead) joyX = +1;
+    if (rawX < -dead) joyX = -1;
+    if (rawY >  dead) joyY = +1;
+    if (rawY < -dead) joyY = -1;
+
+    // =========================================================================
+    //  Mise à jour caméra
+    // =========================================================================
+    update_camera(g_state.grid, g_state.props, joyX, joyY);
 }
+
 
 // ============================================================================
 //  Helpers progression
@@ -453,10 +521,10 @@ void game_restart_after_death()
 }
 
 // ============================================================================
-//  DESSIN
+//  DESSIN (inchangé pour l’instant — patch final après graphics.cpp)
 // ============================================================================
 void game_draw() {
-
+    
     if (g_mode == GameMode::Menu) {
         menu_draw();
         return;
@@ -466,48 +534,76 @@ void game_draw() {
         return;
     }
 
-    // Fond noir rapide
     gfx_clear(COLOR_BLACK);
+
+    // -------------------------------------------------------------------------
+    // 1) Calcul du tile en pixels (zoom Q8.8)
+    // -------------------------------------------------------------------------
+    const int tile_px = (TILE_SIZE * g_zoomFp) >> 8;
+
+    // -------------------------------------------------------------------------
+    // 2) Zone visible en tiles (dépend du zoom)
+    // -------------------------------------------------------------------------
+    const int vw = view_tiles_w();
+    const int vh = view_tiles_h();
 
     int camTileX = (int)g_camera.x;
     int camTileY = (int)g_camera.y;
 
-    int endX = std::min(camTileX + VIEW_TILES_W + 1, g_state.grid.width);
-    int endY = std::min(camTileY + VIEW_TILES_H + 1, g_state.grid.height);
+    int endX = std::min(camTileX + vw + 1, g_state.grid.width);
+    int endY = std::min(camTileY + vh + 1, g_state.grid.height);
 
-    // Dessin de la grille
+    // -------------------------------------------------------------------------
+    // 3) Dessin de la grille
+    // -------------------------------------------------------------------------
     for (int y = camTileY; y < endY; ++y) {
         for (int x = camTileX; x < endX; ++x) {
 
-            int screenX = (int)((x - g_camera.x) * TILE_SIZE);
-            int screenY = (int)((y - g_camera.y) * TILE_SIZE);
+            // Projection monde → écran
+            int screenX = ((x - g_camera.x) * tile_px);
+            int screenY = ((y - g_camera.y) * tile_px);
 
-            if (screenX >= SCREEN_W || screenX + TILE_SIZE <= 0 ||
-                screenY >= SCREEN_H || screenY + TILE_SIZE <= 0)
+            // Clipping rapide
+            if (screenX >= SCREEN_W || screenX + tile_px <= 0 ||
+                screenY >= SCREEN_H || screenY + tile_px <= 0)
                 continue;
 
+            // Zone hors play area
             if (!g_state.grid.in_play_area(x, y)) {
-                gfx_fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE, 0x7BEF);
+                gfx_fillRect(screenX, screenY, tile_px, tile_px, 0x7BEF);
                 continue;
             }
 
-            draw_cell(screenX, screenY, g_state.grid.cell(x, y), g_state.props);
+            // -----------------------------------------------------------------
+            // 4) Choix entre version normale et version zoomée
+            // -----------------------------------------------------------------
+            if (g_zoomFp == 256) {
+                // Zoom 1.0 → version originale
+                draw_cell(screenX, screenY, g_state.grid.cell(x, y), g_state.props);
+            } else {
+                // Zoom ≠ 1.0 → version zoomée
+                draw_cell_scaled(screenX, screenY, g_state.grid.cell(x, y),
+                                 g_state.props, g_zoomFp);
+            }
         }
     }
 
-    // Remplir la zone à droite si la grille ne couvre pas toute la largeur
-    int drawnWidth = (endX - camTileX) * TILE_SIZE;
+    // -------------------------------------------------------------------------
+    // 5) Remplissage des zones hors grille (droite / bas)
+    // -------------------------------------------------------------------------
+    int drawnWidth  = (endX - camTileX) * tile_px;
+    int drawnHeight = (endY - camTileY) * tile_px;
+
     if (drawnWidth < SCREEN_W) {
         gfx_fillRect(drawnWidth, 0, SCREEN_W - drawnWidth, SCREEN_H, 0x7BEF);
     }
 
-    // Remplir la zone en bas si la grille ne couvre pas toute la hauteur
-    int drawnHeight = (endY - camTileY) * TILE_SIZE;
     if (drawnHeight < SCREEN_H) {
         gfx_fillRect(0, drawnHeight, SCREEN_W, SCREEN_H - drawnHeight, 0x7BEF);
     }
 
     gfx_flush();
 }
+
 
 } // namespace baba

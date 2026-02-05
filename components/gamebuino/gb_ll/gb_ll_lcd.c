@@ -20,6 +20,7 @@ Authors:
  - Jean-Marie Papillon
 */
 #include "gb_common.h"
+#include "gb_config.h"
 #include <esp_lcd_panel_io.h>
 #include "esp_lcd_io_i80.h"
 #include "gb_ll_lcd.h"
@@ -30,13 +31,13 @@ Authors:
 
 static volatile uint32_t u32_start_refresh = 0;
 static volatile uint32_t u32_delta_refresh = 0;
-static volatile uint32_t u32_refresh_ctr = 0;
+static volatile uint8_t  u8_refresh_ctr = 0;
 static volatile uint32_t u32_draw_count = 0;
 
 IRAM_ATTR bool color_trans_done_cb(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx) 
 {
-    u32_delta_refresh = 0;
-    u32_refresh_ctr++;
+    u32_delta_refresh = gb_get_millis() - u32_start_refresh;
+    u8_refresh_ctr=1;
     u32_start_refresh = 0;
     return false;
 }
@@ -191,9 +192,6 @@ int digitalRead( gpio_num_t pin )
     return gpio_get_level(pin);
 }
 
-
-
-
 void LCD_FAST_test(const gb_pixel* u16_pframe_buffer)
 {
     u32_start_refresh = gb_get_millis(); // start date
@@ -205,7 +203,6 @@ void ILI9342C_write_cmd( uint8_t cmd, const uint8_t *pu8_data, int len )
 {
     esp_lcd_panel_io_tx_param ( lcd_panel_h, cmd, pu8_data, len );
 }
-
 
 uint32_t LCD_last_refresh_delay()
 {
@@ -256,8 +253,27 @@ void lcd_drawBitmap( int16_t x, int16_t y, const uint8_t *bitmap, uint16_t u16_p
 
 void lcd_clear( uint16_t u16_pix_color )
 {
-    for (int x = 0 ; x < 320*240 ; x++ )
-        framebuffer[x] = u16_pix_color;
+    gb_pixel* pdest = &framebuffer[0];
+    uint32_t u32_count = SCREEN_WIDTH*SCREEN_HEIGHT/4;
+    while(u32_count--) {
+        *pdest++ = u16_pix_color;
+        *pdest++ = u16_pix_color;
+        *pdest++ = u16_pix_color;
+        *pdest++ = u16_pix_color;
+    }
+}
+
+void lcd_dpo()
+{
+    #ifndef USE_VIDEO_256_INDEXED
+    gb_pixel* pdest = &framebuffer[0];
+    uint32_t u32_count = SCREEN_WIDTH*SCREEN_HEIGHT;
+    while(u32_count--) {
+        gb_pixel c = *pdest;
+        c &= 0xF7DF;
+        *pdest++ = c>>1;
+    }
+    #endif // of not defined USE_VIDEO_256_INDEXED
 }
 
 
@@ -436,7 +452,7 @@ void gb_ll_lcd_init()
     const uint8_t te_cfg[] = { 0x00 }; // Tearing effecct output mode : V-Blanking information only
     ILI9342C_write_cmd( 0x35, te_cfg, 1);
 
-    u32_refresh_ctr = 1;
+    u8_refresh_ctr = 1; // start with end of refresh set
 
 
     lcd_set_fps(100); // max for intro scrool
@@ -469,7 +485,7 @@ gb_pixel lcd_getpixel( uint16_t x, uint16_t y)
 
 uint8_t lcd_refresh_completed()
 {
-    return u32_refresh_ctr;
+    return u8_refresh_ctr;
 }
 
 
@@ -483,8 +499,8 @@ uint32_t gb_ll_lcd_get_draw_count()
 
 void lcd_refresh()
 {
-    while( u32_refresh_ctr == 0 );  // wait last update compleped ( DMA )
-    u32_refresh_ctr = 0;            // reset complete dma flag
+    while( u8_refresh_ctr == 0 );  // wait last update compleped ( DMA )
+    u8_refresh_ctr = 0;            // reset complete dma flag
     #ifdef USE_VSYCNC
       // Sync to Scanline
     uint64_t start_us = gb_get_micros();

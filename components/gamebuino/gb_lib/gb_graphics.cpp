@@ -84,18 +84,39 @@ void gb_graphics::drawFastVLine(int16_t x, int16_t y, int16_t h) {
 	// Update in subclasses if desired!
 	if (h < 0) {
 		y += h + 1;
-		h = abs(h);
+		h = -h;
 	}
-	drawLine(x, y, x, y+h-1);
+//	drawLine(x, y, x, y+h-1); don't use bresenham !
+// 2026/01/28 : fast implementation
+
+	if ( ( x < 0 ) || (x >=SCREEN_WIDTH) )
+		return;
+	y = BOUND( y, 0, SCREEN_HEIGHT-1 );
+	h = BOUND( h, 0, SCREEN_HEIGHT-y );
+	gb_pixel* pdest = &framebuffer[x + y*SCREEN_WIDTH];
+	while(h--)
+	{
+		*pdest = u16_color_pen;
+		pdest+=SCREEN_WIDTH;
+	}
 }
+
 
 void gb_graphics::drawFastHLine(int16_t x, int16_t y, int16_t w) {
 	// Update in subclasses if desired!
 	if (w < 0) {
 		x += w + 1;
-		w = abs(w);
+		w = -w;
 	}
-	drawLine(x, y, x+w-1, y);
+//	drawLine(x, y, x+w-1, y); don't use bresenham !
+// 2026/01/28 : fast implementation
+	if ( ( y < 0 ) || (y >=SCREEN_HEIGHT) )
+		return;
+	x = BOUND( x, 0, SCREEN_WIDTH-1 );
+	w = BOUND( w, 0, SCREEN_WIDTH-x );
+	gb_pixel* pdest = &framebuffer[x + y*SCREEN_WIDTH];
+	while(w--)
+		*pdest++ = u16_color_pen;
 }
 
 // Draw a rectangle
@@ -106,12 +127,22 @@ void gb_graphics::drawRect(int16_t x, int16_t y, int16_t w, int16_t h) {
 	drawFastVLine(x+w-1, y, h);
 }
 
+void gb_graphics::clear(uint16_t color) {
+	lcd_clear(color);
+}
+
+void gb_graphics::clear() {
+	lcd_clear(u16_color_pen);
+}
+
 
 void gb_graphics::fillRect(int16_t x, int16_t y, int16_t w, int16_t h) {
 	// Update in subclasses if desired!
-	for (int16_t i=x; i<x+w; i++) {
-		drawFastVLine(i, y, h);
-	}
+//	for (int16_t i=x; i<x+w; i++) 
+//		drawFastVLine(i, y, h);
+		// 2026/01/28 : drawFastHLine more faster
+	for (int16_t i=y; i<y+h; i++) 
+		drawFastHLine(x, i, w);
 }
 
 
@@ -433,12 +464,6 @@ uint16_t gb_graphics::get_backlight()
 {
 	return _u16_duty_lcd_pwm;
 }
-
-/*
-            uint32_t u32_now = core.get_millis();
-            if (( u32_now - u32_start ) > 1000 )
-*/
-
 	//! return fps for last sec
 float gb_graphics::get_fps()
 {
@@ -446,34 +471,19 @@ float gb_graphics::get_fps()
 }
 void gb_graphics::update()
 {
-    lcd_refresh();
+	lcd_refresh();
 
-    uint32_t t0 = gb_get_millis();
-
-    // Attente non bloquante, max 20 ms
-    while (!lcd_refresh_completed())
-    {
-        vTaskDelay(1); // rend la main au scheduler
-
-        if (gb_get_millis() - t0 > 20)
-        {
-            printf("LCD timeout\n");
-            break;
-        }
-    }
-
-    // Stats FPS (inchangé)
-    uint32_t u32_now = gb_get_millis();
-    if ((u32_now - u32_last_stat_date) > 1000)
-    {
-        uint32_t u32_draw_now = gb_ll_lcd_get_draw_count();
-        f32_fps_stat = 1000.0f * (u32_draw_now - u32_last_stat_count) /
-                       ((float)(u32_now - u32_last_stat_date));
-        u32_last_stat_date = u32_now;
-        u32_last_stat_count = u32_draw_now;
-    }
+	uint32_t u32_now = gb_get_millis();
+	if ( ( u32_now - u32_last_stat_date ) > 1000 )
+	{
+		uint32_t u32_draw_now = gb_ll_lcd_get_draw_count();
+		f32_fps_stat = 1000.0f*(u32_draw_now - u32_last_stat_count)/((float)(u32_now-u32_last_stat_date)) ;
+		u32_last_stat_date = u32_now;
+		u32_last_stat_count = u32_draw_now;
+	}
+	while( !lcd_refresh_completed() )
+		gb_delay_ms(1);
 }
-
 
 /*
 void graphics_basic::drawChar(int16_t x, int16_t y, unsigned char c, uint8_t size) {

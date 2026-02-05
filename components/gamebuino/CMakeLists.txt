@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS 
 
-    # Gamebuino low level : drivers
+            # Gamebuino low level : drivers
         "gb_ll/gb_ll_i2c.c"
         "gb_ll/gb_ll_adc.c"
         "gb_ll/gb_ll_audio.c"
@@ -10,7 +10,7 @@ idf_component_register(
         "gb_ll/gb_ll_sdcard.c"
         "gb_ll/gb_ll_system.c"
 
-    # Gamebuino mid level librarys : user entry level
+            # Gamebuino mid level librarys : user entry level
         "gb_lib/gb_audio_player.cpp"
         "gb_lib/gb_audio_track_tone.cpp"
         "gb_lib/gb_audio_track_fx.cpp"
@@ -19,7 +19,6 @@ idf_component_register(
         "gb_lib/gb_audio_track_pmf.cpp"
         "gb_lib/gb_core.cpp"
         "gb_lib/gb_graphics.cpp"
-	"gb_lib/font8x8_basic.cpp"
         
     REQUIRES 
         esp_driver_ledc 

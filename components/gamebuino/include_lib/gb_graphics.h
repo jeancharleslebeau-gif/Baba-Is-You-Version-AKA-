@@ -27,6 +27,10 @@ class gb_graphics {
     public:
     gb_graphics();
      ~gb_graphics();
+        //! clear screen with requested color
+    void clear(uint16_t color);
+        //! clear screen with current pen color (set by use setColor())
+    void clear();
     void drawLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1);
 	void drawFastVLine(int16_t x, int16_t y, int16_t h);
 	void drawFastHLine(int16_t x, int16_t y, int16_t w);
@@ -40,15 +44,21 @@ class gb_graphics {
 	void fillTriangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t x2, int16_t y2);
 	void drawRoundRect(int16_t x0, int16_t y0, int16_t w, int16_t h, int16_t radius);
 	void fillRoundRect(int16_t x0, int16_t y0, int16_t w, int16_t h, int16_t radius);
-
+        // draw a simple pixel at corinates with current pen color (use setColor to change)
     inline void drawPixel( int16_t x, int16_t y, uint16_t u16_color ) {
         lcd_putpixel( x, y, u16_color );
     }
+        // draw a simple pixel at corinates with requested color
     inline void drawPixel( int16_t x, int16_t y ) {
         lcd_putpixel( x, y, u16_color_pen );
     }
+        // set current draw color for shapes and text
     inline void setColor( uint16_t u16_color ) {
         u16_color_pen = u16_color;
+    }
+        // make color from tree 8 bits RGB components (0..255)
+    inline uint16_t makeColor(uint8_t red, uint8_t green, uint8_t blue) {
+        return lcd_color_rgb(red, green, blue);
     }
         // draw ASCII char at location
     void draw_char( uint16_t x, uint16_t y, char c );

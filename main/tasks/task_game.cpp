@@ -30,7 +30,7 @@
 #include "game/game.h"
 #include "game/config.h"
 #include "game/options.h"
-
+extern gb_core g_core;
 namespace baba
 {
 
@@ -43,24 +43,10 @@ float g_time = 0.0f;
 //  Variables internes
 // -----------------------------------------------------------------------------
 static GameMode s_prevMode = GameMode::Title;
-static Keys s_prevKeys{};
 
 // Cooldown pour les déplacements (en ms)
 static uint32_t s_lastMoveTimeMs = 0;
 static constexpr uint32_t MOVE_DELAY_MS = 120;
-
-// Détection front montant
-static inline bool pressed_A(const Keys &now)     { return now.A    && !s_prevKeys.A; }
-static inline bool pressed_MENU(const Keys &now)  { return now.MENU && !s_prevKeys.MENU; }
-static inline bool pressed_UP(const Keys &now)    { return now.up    && !s_prevKeys.up; }
-static inline bool pressed_DOWN(const Keys &now)  { return now.down  && !s_prevKeys.down; }
-static inline bool pressed_LEFT(const Keys &now)  { return now.left  && !s_prevKeys.left; }
-static inline bool pressed_RIGHT(const Keys &now) { return now.right && !s_prevKeys.right; }
-
-static inline bool pressed_any_dir(const Keys& now)
-{
-    return pressed_UP(now) || pressed_DOWN(now) || pressed_LEFT(now) || pressed_RIGHT(now);
-}
 
 // -----------------------------------------------------------------------------
 //  Actions à effectuer lors de l’entrée dans un nouvel état
@@ -109,16 +95,11 @@ void task_game(void *)
     on_enter_mode(game_mode());
     s_prevMode = game_mode();
 
-    const TickType_t frame_period = pdMS_TO_TICKS(25); // ~40 FPS
-    TickType_t last_wake = xTaskGetTickCount();
-
     while (true)
     {
-        vTaskDelayUntil(&last_wake, frame_period);
+        g_core.pool();
 
         g_time += 0.025f;
-
-        Keys k = g_keys;
 
         if (game_mode() != s_prevMode)
         {
@@ -129,7 +110,7 @@ void task_game(void *)
         switch (game_mode())
         {
         case GameMode::Title:
-            if (pressed_A(k))
+            if ( g_core.buttons.pressed(gb_buttons::KEY_A)  )
             {
                 game_load_level(0);
                 game_mode() = GameMode::Playing;
@@ -139,15 +120,12 @@ void task_game(void *)
         case GameMode::Playing:
         {
             uint32_t nowMs = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
-            bool dirPressed = pressed_any_dir(k);
 
-            if (dirPressed)
+
+            if (true)
             {
-                if (nowMs - s_lastMoveTimeMs >= MOVE_DELAY_MS)
-                {
-                    game_update();
-                    s_lastMoveTimeMs = nowMs;
-                }
+                game_update();
+                s_lastMoveTimeMs = nowMs;
             }
 
             if (game_state().hasWon)
@@ -155,13 +133,14 @@ void task_game(void *)
                 game_mode() = GameMode::Win;
                 break;
             }
+			
             if (game_state().hasDied)
             {
                 game_mode() = GameMode::Dead;
                 break;
             }
 
-            if (pressed_MENU(k))
+            if ( g_core.buttons.pressed(gb_buttons::KEY_MENU)  )
             {
                 fade_out();
                 game_mode() = GameMode::Menu;
@@ -175,10 +154,46 @@ void task_game(void *)
             // ...
             break;
 
-        case GameMode::Dead:
-            // inchangé
-            // ...
-            break;
+		case GameMode::Dead:
+		{
+			// =========================================================================
+			//  ÉTAT : Dead
+			// -------------------------------------------------------------------------
+			//  Ce mode est activé lorsque game_update() détecte une mort (hasDied = true).
+			//  La logique de mort NE DOIT PAS être dans game_update() : c’est ici, dans
+			//  la machine à états, que l’on gère les transitions visuelles et temporelles.
+			//
+			//  Pipeline :
+			//      1) Afficher un message de mort
+			//      2) Petite pause (freeze dramatique)
+			//      3) Recharger le niveau courant (game_load_level)
+			//      4) Retour en mode Playing
+			//
+			//  Note :
+			//      game_load_level() vide déjà le rollback → comportement fidèle à Baba.
+			// =========================================================================
+
+			// --- 1) Écran de mort ---
+			gfx_clear(COLOR_BLACK);
+			gfx_text_center(SCREEN_H/2 - 10, "BABA EST MORT", COLOR_WHITE);
+			gfx_text_center(SCREEN_H/2 + 10, "Redemarrage...", COLOR_WHITE);
+			gfx_flush();
+
+			// --- 2) Petite pause (freeze) ---
+			//     400–600 ms donne un bon ressenti. Ici : 500 ms.
+			vTaskDelay(pdMS_TO_TICKS(500));
+
+			// --- 3) Recharger le niveau courant ---
+			//     Cela réinitialise la grille, les règles, la caméra, la musique,
+			//     et vide le rollback (déjà géré dans game_load_level()).
+			//     On verra plus tard si on autorise le roll back avant, dans ce cas.
+			game_load_level(game_state().currentLevel);
+
+			// --- 4) Retour au gameplay ---
+			game_mode() = GameMode::Playing;
+			break;
+		}
+
 
         case GameMode::Menu:
             options_update();
@@ -195,8 +210,8 @@ void task_game(void *)
             gfx_flush();
         }
 
-        s_prevKeys = k;
     }
 }
 
 } // namespace baba
+	

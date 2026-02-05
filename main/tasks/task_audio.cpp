@@ -70,11 +70,11 @@ extern "C" void task_audio(void*)
         */
         MusicID requested = MusicID::NONE;
 
-        if (baba::g_audio_cmd_mutex)
+//        if (baba::g_audio_cmd_mutex)
         {
-            xSemaphoreTake(baba::g_audio_cmd_mutex, portMAX_DELAY);
+//            xSemaphoreTake(baba::g_audio_cmd_mutex, portMAX_DELAY);
             requested = baba::g_requested_music;
-            xSemaphoreGive(baba::g_audio_cmd_mutex);
+//            xSemaphoreGive(baba::g_audio_cmd_mutex);
         }
 
         /*

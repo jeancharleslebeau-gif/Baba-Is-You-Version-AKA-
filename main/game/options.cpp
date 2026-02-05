@@ -23,7 +23,8 @@
 #include "game/game.h"
 #include "game/levels.h"
 #include "esp_timer.h"
-
+#include <gamebuino.h>
+extern gb_core g_core;
 namespace baba {
 
 // ============================================================================
@@ -113,7 +114,7 @@ static void draw_item(int y, const char* text, bool selected) {
 // ============================================================================
 //  PAGE ROOT
 // ============================================================================
-static void page_root(const Keys& k) {
+static void page_root() {
     const char* items[] = {
         "Audio",
         "Choisir niveau",
@@ -122,10 +123,10 @@ static void page_root(const Keys& k) {
     };
     const int count = 4;
 
-    if (k.up    && input_ready()) cursor = (cursor + count - 1) % count;
-    if (k.down  && input_ready()) cursor = (cursor + 1) % count;
+    if ( g_core.buttons.pressed(gb_buttons::KEY_UP)  && input_ready()) cursor = (cursor + count - 1) % count;
+    if ( g_core.buttons.pressed(gb_buttons::KEY_DOWN)   && input_ready()) cursor = (cursor + 1) % count;
 
-    if (k.A && input_ready()) {
+    if ( g_core.buttons.pressed(gb_buttons::KEY_A) && input_ready()) {
         if (cursor == 0) { page = OptionsPage::AUDIO;        cursor = 0; }
         if (cursor == 1) { page = OptionsPage::LEVEL_SELECT; cursor = 0; }
         if (cursor == 2) { page = OptionsPage::EDITOR;       cursor = 0; }
@@ -148,11 +149,11 @@ static void page_root(const Keys& k) {
 // ============================================================================
 //  PAGE AUDIO
 // ============================================================================
-static void page_audio(const Keys& k) {
+static void page_audio() {
     const int count = 6;
 
-    if (k.up    && input_ready()) cursor = (cursor + count - 1) % count;
-    if (k.down  && input_ready()) cursor = (cursor + 1) % count;
+    if ( g_core.buttons.pressed(gb_buttons::KEY_UP)    && input_ready()) cursor = (cursor + count - 1) % count;
+    if ( g_core.buttons.pressed(gb_buttons::KEY_DOWN)  && input_ready()) cursor = (cursor + 1) % count;
 
     // Réglage volumes musique/SFX
     if (cursor <= 1) {
@@ -161,10 +162,10 @@ static void page_audio(const Keys& k) {
             &g_audio_settings.sfx_volume
         };
 
-        if (k.left  && input_ready() && *volumes[cursor] > 0)
+        if ( g_core.buttons.pressed(gb_buttons::KEY_LEFT)  && input_ready() && *volumes[cursor] > 0)
             (*volumes[cursor])--;
 
-        if (k.right && input_ready() && *volumes[cursor] < 100)
+        if ( g_core.buttons.pressed(gb_buttons::KEY_RIGHT) && input_ready() && *volumes[cursor] < 100)
             (*volumes[cursor])++;
 
         if (cursor == 0)
@@ -176,7 +177,7 @@ static void page_audio(const Keys& k) {
     }
 
     // Toggle son global
-    if (cursor == 2 && k.A && input_ready()) {
+    if (cursor == 2 && g_core.buttons.pressed(gb_buttons::KEY_A) && input_ready()) {
         soundEnabled = !soundEnabled;
         options_save();
 
@@ -190,7 +191,7 @@ static void page_audio(const Keys& k) {
     }
 
     // Navigation sous-pages
-    if (k.A && input_ready()) {
+    if (  g_core.buttons.pressed(gb_buttons::KEY_A)  && input_ready()) {
         if (cursor == 3) page = OptionsPage::AUDIO_TEST;
         if (cursor == 4) page = OptionsPage::AUDIO_MUSIC;
         if (cursor == 5) page = OptionsPage::ROOT;
@@ -217,7 +218,7 @@ static void page_audio(const Keys& k) {
 // ============================================================================
 //  PAGE TEST SONS
 // ============================================================================
-static void page_audio_test(const Keys& k) {
+static void page_audio_test() {
     const char* items[] = {
         "Move",
         "Push",
@@ -227,10 +228,10 @@ static void page_audio_test(const Keys& k) {
     };
     const int count = 5;
 
-    if (k.up    && input_ready()) cursor = (cursor + count - 1) % count;
-    if (k.down  && input_ready()) cursor = (cursor + 1) % count;
+    if ( g_core.buttons.pressed(gb_buttons::KEY_UP)    && input_ready()) cursor = (cursor + count - 1) % count;
+    if ( g_core.buttons.pressed(gb_buttons::KEY_DOWN)  && input_ready()) cursor = (cursor + 1) % count;
 
-    if (k.A && input_ready()) {
+    if ( g_core.buttons.pressed(gb_buttons::KEY_A) && input_ready()) {
         if (cursor == 0) audio_play_move();
         if (cursor == 1) audio_play_push();
         if (cursor == 2) audio_play_win();
@@ -250,20 +251,20 @@ static void page_audio_test(const Keys& k) {
 // ============================================================================
 //  PAGE CHOIX MUSIQUE
 // ============================================================================
-static void page_audio_music(const Keys& k) {
+static void page_audio_music() {
     const int musicCount = 7;
 
-    if (k.up    && input_ready()) cursor = (cursor + musicCount - 1) % musicCount;
-    if (k.down  && input_ready()) cursor = (cursor + 1) % musicCount;
+    if ( g_core.buttons.pressed(gb_buttons::KEY_UP)    && input_ready()) cursor = (cursor + musicCount - 1) % musicCount;
+    if ( g_core.buttons.pressed(gb_buttons::KEY_DOWN)  && input_ready()) cursor = (cursor + 1) % musicCount;
 
-    if (k.A && input_ready()) {
+    if ( g_core.buttons.pressed(gb_buttons::KEY_A)  && input_ready()) {
         forcedMusic = static_cast<MusicID>(cursor);
         game_set_forced_music(forcedMusic, true);
         audio_request_music(forcedMusic);
         options_save();
     }
 
-    if (k.B && input_ready()) {
+    if ( g_core.buttons.pressed(gb_buttons::KEY_B) && input_ready()) {
         forcedMusic = MusicID::NONE;
         game_set_forced_music(MusicID::NONE, false);
         page = OptionsPage::AUDIO;
@@ -292,18 +293,18 @@ static void page_audio_music(const Keys& k) {
 // ============================================================================
 //  PAGE SELECTION NIVEAU (normal + custom)
 // ============================================================================
-static void page_level_select(const Keys& k) {
+static void page_level_select() {
 
     const int normalLevels = levels_count();
     const int totalLevels = normalLevels + 3; // Custom 1..3
 
-    if (k.left  && input_ready())
+    if (  g_core.buttons.pressed(gb_buttons::KEY_LEFT)  && input_ready())
         selectedLevel = (selectedLevel + totalLevels - 1) % totalLevels;
 
-    if (k.right && input_ready())
+    if ( g_core.buttons.pressed(gb_buttons::KEY_RIGHT) && input_ready())
         selectedLevel = (selectedLevel + 1) % totalLevels;
 
-    if (k.A && input_ready()) {
+    if ( g_core.buttons.pressed(gb_buttons::KEY_A)  && input_ready()) {
         int index = selectedLevel;
 
         if (index >= normalLevels)
@@ -313,7 +314,7 @@ static void page_level_select(const Keys& k) {
         game_mode() = GameMode::Playing;
     }
 
-    if (k.B && input_ready())
+    if ( g_core.buttons.pressed(gb_buttons::KEY_B) && input_ready())
         page = OptionsPage::ROOT;
 
     gfx_clear(COLOR_BLACK);
@@ -335,13 +336,13 @@ static void page_level_select(const Keys& k) {
 // ============================================================================
 //  PAGE EDITEUR (placeholder)
 // ============================================================================
-static void page_editor(const Keys& k) {
+static void page_editor() {
     gfx_clear(COLOR_BLACK);
     gfx_text_center(40, "EDITEUR", COLOR_WHITE);
     gfx_text_center(120, "Aucun editeur implemente", COLOR_YELLOW);
     gfx_text_center(200, "B = Retour", COLOR_WHITE);
 
-    if (k.B && input_ready())
+    if ( g_core.buttons.pressed(gb_buttons::KEY_B) && input_ready())
         page = OptionsPage::ROOT;
 
     gfx_flush();
@@ -351,15 +352,15 @@ static void page_editor(const Keys& k) {
 //  Fonction principale appelée depuis task_game
 // ============================================================================
 void options_update() {
-    Keys k = g_keys;
+
 
     switch (page) {
-        case OptionsPage::ROOT:         page_root(k); break;
-        case OptionsPage::AUDIO:        page_audio(k); break;
-        case OptionsPage::AUDIO_TEST:   page_audio_test(k); break;
-        case OptionsPage::AUDIO_MUSIC:  page_audio_music(k); break;
-        case OptionsPage::LEVEL_SELECT: page_level_select(k); break;
-        case OptionsPage::EDITOR:       page_editor(k); break;
+        case OptionsPage::ROOT:         page_root(); break;
+        case OptionsPage::AUDIO:        page_audio(); break;
+        case OptionsPage::AUDIO_TEST:   page_audio_test(); break;
+        case OptionsPage::AUDIO_MUSIC:  page_audio_music(); break;
+        case OptionsPage::LEVEL_SELECT: page_level_select(); break;
+        case OptionsPage::EDITOR:       page_editor(); break;
     }
 }
 

@@ -9,7 +9,9 @@
 #include "rules.h"
 #include "assets/gfx/atlas.h"
 #include "core/graphics.h"
-#include "sprites.h"
+#include "game/config.h"   
+#include "game/game.h"     
+#include "core/sprites.h"
 
 namespace baba {
 
@@ -108,7 +110,7 @@ static void draw_win_effect(int px, int py, float time)
 }
 
 // -----------------------------------------------------------------------------
-//  draw_cell() — Dessine une cellule + effet WIN
+//  draw_cell() — Version 1: dessin normal (sans zoom)
 // -----------------------------------------------------------------------------
 void draw_cell(int x, int y, const Cell& c, const PropertyTable& props)
 {
@@ -126,6 +128,70 @@ void draw_cell(int x, int y, const Cell& c, const PropertyTable& props)
     if (hasYou && hasWin) {
         extern float g_time;
         draw_win_effect(x, y, g_time);
+    }
+}
+
+// -----------------------------------------------------------------------------
+//  draw_cell_scaled() — Version 2: dessin avec zoom Q8.8
+// -----------------------------------------------------------------------------
+void draw_cell_scaled(int x, int y, const Cell& c, const PropertyTable& props, int scale_fp)
+{
+    bool hasYou = false;
+    bool hasWin = false;
+
+    // Taille finale d’un tile en pixels
+    int tile_px = (TILE_SIZE * scale_fp) >> 8;
+
+    for (auto& obj : c.objects)
+    {
+        // Récupération du sprite dans l’atlas
+        SpriteRect r = sprite_rect_for(obj.type);
+
+        // Blit zoomé
+        gfx_blitRegionScaled(
+            getAtlasPixels(),
+            256,               // largeur atlas
+            r.x, r.y,
+            r.w, r.h,
+            x, y,
+            scale_fp
+        );
+
+        const Properties& pr = props[(int)obj.type];
+        if (pr.you) hasYou = true;
+        if (pr.win) hasWin = true;
+    }
+
+    // Effet WIN (adapté au zoom)
+    if (hasYou && hasWin) {
+        extern float g_time;
+
+        // On applique le zoom au centre de la cellule
+        float cx = x + tile_px * 0.5f;
+        float cy = y + tile_px * 0.5f;
+
+        const int count = 12;
+
+        for (int i = 0; i < count; i++) {
+            float t = g_time * 4.0f + i * 0.7f;
+
+            float angle  = fmodf(t * 2.3f + i * 1.1f, 6.28318f);
+            float radius = (2.0f + 3.0f * (0.5f + 0.5f * sinf(t * 3.0f)))
+                           * (scale_fp / 256.0f);
+
+            float px2 = cx + cosf(angle) * radius;
+            float py2 = cy + sinf(angle) * radius;
+
+            float alpha = 0.6f + 0.4f * sinf(t * 5.0f);
+
+            uint8_t r = static_cast<uint8_t>(255 * alpha);
+            uint8_t g = static_cast<uint8_t>(240 * alpha);
+            uint8_t b = static_cast<uint8_t>(120 * alpha);
+
+            uint16_t col = rgb565(r, g, b);
+
+            gfx_fillRect(px2 - 1, py2 - 1, 2, 2, col);
+        }
     }
 }
 

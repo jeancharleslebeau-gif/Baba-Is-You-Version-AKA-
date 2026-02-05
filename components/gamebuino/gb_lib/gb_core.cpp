@@ -29,6 +29,7 @@ Authors:
 #include "gb_ll_adc.h"
 #include "gb_ll_sdcard.h"
 #include "gb_ll_system.h"
+#include "gb_ll_adc.h"
 
 
 gb_core::gb_core() {
@@ -115,10 +116,121 @@ int16_t gb_joystick::get_y()
     return i16_joy_y;
 }
 
+float gb_joystick::get_posx()
+{
+    return f32_joy_pos_x;
+}
+
+float gb_joystick::get_posy()
+{
+    return f32_joy_pos_y;
+}
+
+    //! set X Joystick position range, like a mouse. Set fmin=0 and fmax=0 to disable feature ( default )
+void gb_joystick::set_posx_range( float fmin, float fmax )
+{
+    f32_joy_pos_x_min = fmin;
+    f32_joy_pos_x_max = fmax;
+}
+    //! set Y Joystick position range, like a mouse. Set fmin=0 and fmax=0 to disable feature ( default )
+void gb_joystick::set_posy_range( float fmin, float fmax )
+{
+    f32_joy_pos_y_min = fmin;
+    f32_joy_pos_y_max = fmax;
+}
+    //! set XY Joystick integra dispacment speed in pix/seconds ( default = 100 )
+void gb_joystick::set_posxy_speed( float fspeed )
+{
+    f32_joy_speed_xy = fspeed;
+}
+
+    //! set XY Joystick integral position ( default = center of screen )
+void gb_joystick::set_posxy( float posx, float posy )
+{
+    f32_joy_pos_x = BOUND( posx, f32_joy_pos_x_min, f32_joy_pos_x_max );
+    f32_joy_pos_y = BOUND( posy, f32_joy_pos_y_min, f32_joy_pos_y_max );
+}
+
+
+    //! D-Pad emulation on joystick
+uint16_t gb_joystick::state()
+{
+    return u16_buttons;
+}
+    //! D-Pad emulation on joystick
+uint16_t gb_joystick::pressed()
+{
+    return u16_buttons & (~u16_buttons_last);
+}
+
+    //! D-Pad emulation on joystick
+bool gb_joystick::pressed( gb_buttons::gb_key key )
+{
+    return (pressed()&key)?true:false;
+}
+
+    //! D-Pad emulation on joystick
+uint16_t gb_joystick::released()
+{
+    return (~u16_buttons) & u16_buttons_last;
+}
+
+    //! D-Pad emulation on joystick
+bool gb_joystick::released( gb_buttons::gb_key key )
+{
+    return (released()&key)?true:false;
+}
+
+
+
+    //! calibrage center position
+void gb_joystick::calibrate_center()
+{
+    i32_joy_center_x = 0;
+    i32_joy_center_y = 0;
+    for ( int i = 0 ; i < 1000 ; i++ )
+    {
+        i32_joy_center_x += gb_ll_adc_read_joyx();
+        i32_joy_center_y += gb_ll_adc_read_joyy();
+        gb_delay_us(100);
+    }
+    i32_joy_center_x/=1000;
+    i32_joy_center_y/=1000;
+}
+
 void gb_joystick::update()
 {
-    i16_joy_x = 2000*(gb_ll_adc_read_joyx()-JOYX_MID)/JOYX_MAX;
-    i16_joy_y = 2000*(gb_ll_adc_read_joyy()-JOYX_MID)/JOYX_MAX;;
+    uint32_t u32_now = gb_get_millis();
+    i16_joy_x = 2000*(gb_ll_adc_read_joyx()-i32_joy_center_x)/JOYX_MAX;
+    i16_joy_y = 2000*(gb_ll_adc_read_joyy()-i32_joy_center_y)/JOYX_MAX;
+    if ( u32_last_update )
+    {
+        float f32_delta_t_sec = (u32_now-u32_last_update)/1000.0;
+            // update x position
+        if ( (i16_joy_x>50) || (i16_joy_x<-50) )   // death area in center
+            f32_joy_pos_x += f32_delta_t_sec*f32_joy_speed_xy*i16_joy_x/1000.0;
+        if ( f32_joy_pos_x_min && f32_joy_pos_x_max )
+            f32_joy_pos_x = BOUND( f32_joy_pos_x, f32_joy_pos_x_min, f32_joy_pos_x_max );
+            // update y position
+        if ( (i16_joy_y>50) || (i16_joy_y<-50) )   // death area in center
+            f32_joy_pos_y -= f32_delta_t_sec*f32_joy_speed_xy*i16_joy_y/1000.0;
+        if ( f32_joy_pos_y_min && f32_joy_pos_y_max )
+            f32_joy_pos_y = BOUND( f32_joy_pos_y, f32_joy_pos_y_min, f32_joy_pos_y_max );
+
+    }
+
+    u16_buttons_last = u16_buttons;
+    u16_buttons = 0;
+    if ( i16_joy_y > 500 )
+        u16_buttons |= EXPANDER_KEY_UP;
+    if ( i16_joy_y < -500 )
+        u16_buttons |= EXPANDER_KEY_DOWN;
+    if ( i16_joy_x > 500 )
+        u16_buttons |= EXPANDER_KEY_RIGHT;
+    if ( i16_joy_x < -500 )
+        u16_buttons |= EXPANDER_KEY_LEFT;
+
+    u32_last_update = u32_now;
 }
 
 
@@ -152,5 +264,3 @@ void gb_core::power_down()
 {
     gb_ll_expander_power_off();
 }
-
-gb_core g_core;

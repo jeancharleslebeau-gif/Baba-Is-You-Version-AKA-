@@ -14,10 +14,3 @@ ce qui garantit une excellente réactivité même si le jeu tourne
 #pragma once
 #include "core/input.h"
 
-namespace baba {
-
-// Déclaration de la tâche input
-void task_input(void* param);
-
-} // namespace baba
-
