@@ -149,10 +149,38 @@ void task_game(void *)
             break;
         }
 
-        case GameMode::Win:
-            // inchangé
-            // ...
-            break;
+		case GameMode::Win:
+		{
+			// =========================================================================
+			//  ÉTAT : Win
+			// -------------------------------------------------------------------------
+			//  Ce mode est activé lorsque game_update() détecte la réussite du niveau.
+			// =========================================================================
+
+			// --- Construire les messages dynamiques ---
+			char msg1[64];
+			char msg2[64];
+
+			sprintf(msg1, "Bravo, Niveau %d franchi", game_state().currentLevel);
+			sprintf(msg2, "Niveau %d...", game_state().currentLevel + 1);
+
+			// --- 1) Écran de victoire ---
+			gfx_clear(COLOR_BLACK);
+			gfx_text_center(SCREEN_H/2 - 10, msg1, COLOR_WHITE);
+			gfx_text_center(SCREEN_H/2 + 10, msg2, COLOR_WHITE);
+			gfx_flush();
+
+			// --- 2) Petite pause ---
+			vTaskDelay(pdMS_TO_TICKS(1000));
+
+			// --- 3) Charger le niveau suivant ---
+			game_win_continue();
+
+			// --- 4) Retour au gameplay ---
+			game_mode() = GameMode::Playing;
+			break;
+		}
+	
 
 		case GameMode::Dead:
 		{
@@ -160,8 +188,6 @@ void task_game(void *)
 			//  ÉTAT : Dead
 			// -------------------------------------------------------------------------
 			//  Ce mode est activé lorsque game_update() détecte une mort (hasDied = true).
-			//  La logique de mort NE DOIT PAS être dans game_update() : c’est ici, dans
-			//  la machine à états, que l’on gère les transitions visuelles et temporelles.
 			//
 			//  Pipeline :
 			//      1) Afficher un message de mort
@@ -169,8 +195,6 @@ void task_game(void *)
 			//      3) Recharger le niveau courant (game_load_level)
 			//      4) Retour en mode Playing
 			//
-			//  Note :
-			//      game_load_level() vide déjà le rollback → comportement fidèle à Baba.
 			// =========================================================================
 
 			// --- 1) Écran de mort ---
@@ -180,12 +204,9 @@ void task_game(void *)
 			gfx_flush();
 
 			// --- 2) Petite pause (freeze) ---
-			//     400–600 ms donne un bon ressenti. Ici : 500 ms.
-			vTaskDelay(pdMS_TO_TICKS(500));
+			vTaskDelay(pdMS_TO_TICKS(2000));
 
 			// --- 3) Recharger le niveau courant ---
-			//     Cela réinitialise la grille, les règles, la caméra, la musique,
-			//     et vide le rollback (déjà géré dans game_load_level()).
 			//     On verra plus tard si on autorise le roll back avant, dans ce cas.
 			game_load_level(game_state().currentLevel);
 
@@ -193,7 +214,6 @@ void task_game(void *)
 			game_mode() = GameMode::Playing;
 			break;
 		}
-
 
         case GameMode::Menu:
             options_update();

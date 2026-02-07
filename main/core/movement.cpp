@@ -285,21 +285,63 @@ MoveResult step(Grid& grid,
 {
     MoveResult result{};
 
+    const int w = grid.width;
+    const int h = grid.height;
+    const int cellCount = w * h;
+
+    auto cell_index = [w](int x, int y) {
+        return y * w + x;
+    };
+
+    // ------------------------------------------------------------------------
+    // 0) Snapshot avant mouvement (pour détecter les collisions nouvelles)
+    // ------------------------------------------------------------------------
+    struct LayerSnapshot {
+        bool any[2]  = {false, false};
+        bool you[2]  = {false, false};
+        bool kill[2] = {false, false};
+        bool sink[2] = {false, false};
+    };
+
+    std::vector<LayerSnapshot> before(cellCount);
+
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            int idx = cell_index(x, y);
+            Cell& c = grid.cell(x, y);
+
+            for (auto& obj : c.objects) {
+                const Properties& pr = props[(int)obj.type];
+                int layer = pr.floating ? 1 : 0;
+
+                before[idx].any[layer]  = true;
+                if (pr.you)  before[idx].you[layer]  = true;
+                if (pr.kill) before[idx].kill[layer] = true;
+                if (pr.sink) before[idx].sink[layer] = true;
+            }
+        }
+
+    // ------------------------------------------------------------------------
     // 1) MOVE automatique
+    // ------------------------------------------------------------------------
     if (dx != 0 || dy != 0)
         apply_move(grid, props, dx, dy);
 
-    // 2) Snapshot YOU
+    // ------------------------------------------------------------------------
+    // 2) Snapshot des YOU après MOVE
+    // ------------------------------------------------------------------------
     struct YouPos { int x, y; bool floating; };
     std::vector<YouPos> yous;
 
-    for (int y = 0; y < grid.height; ++y)
-        for (int x = 0; x < grid.width; ++x)
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
             for (auto& obj : grid.cell(x, y).objects)
                 if (props[(int)obj.type].you)
                     yous.push_back({x, y, props[(int)obj.type].floating});
 
-    // 3) Déplacements YOU
+    // ------------------------------------------------------------------------
+    // 3) Déplacements YOU (PUSH, PULL, SWAP)
+    // ------------------------------------------------------------------------
     for (auto& yp : yous) {
 
         int nx = yp.x + dx;
@@ -312,32 +354,30 @@ MoveResult step(Grid& grid,
         if (apply_swap(grid, props, yp.x, yp.y, nx, ny, yp.floating,
                        [](const Properties& pr){ return pr.you; }))
         {
-            // PULL après SWAP : tirer depuis la case derrière la nouvelle position
+            // PULL après SWAP
             int backX = nx - dx;
             int backY = ny - dy;
 
             if (grid.in_bounds(backX, backY) && grid.in_play_area(backX, backY)) {
                 Cell& back = grid.cell(backX, backY);
                 Cell& dst  = grid.cell(nx, ny);
+
                 for (auto it = back.objects.begin(); it != back.objects.end(); )
-                    if (props[(int)it->type].pull)
-                    {
+                    if (props[(int)it->type].pull) {
                         dst.objects.push_back(*it);
                         it = back.objects.erase(it);
-                    }
-                    else ++it;
+                    } else ++it;
             }
 
             continue;
         }
 
-        // STOP bloque tout, même PUSH (FLOAT ignoré)
+        // STOP bloque tout
         bool blocked = false;
-        for (auto& obj : grid.cell(nx, ny).objects) {
-            const Properties& pr = props[(int)obj.type];
-            if (pr.stop)
+        for (auto& obj : grid.cell(nx, ny).objects)
+            if (props[(int)obj.type].stop)
                 blocked = true;
-        }
+
         if (blocked)
             continue;
 
@@ -350,108 +390,84 @@ MoveResult step(Grid& grid,
         Cell& dst = grid.cell(nx, ny);
 
         for (auto it = src.objects.begin(); it != src.objects.end(); )
-            if (props[(int)it->type].you)
-            {
+            if (props[(int)it->type].you) {
                 dst.objects.push_back(*it);
                 it = src.objects.erase(it);
-            }
-            else ++it;
+            } else ++it;
 
-        // PULL : tirer depuis la case derrière la position d’origine
+        // PULL
         int backX = yp.x - dx;
         int backY = yp.y - dy;
 
         if (grid.in_bounds(backX, backY) && grid.in_play_area(backX, backY)) {
             Cell& back = grid.cell(backX, backY);
             for (auto it = back.objects.begin(); it != back.objects.end(); )
-                if (props[(int)it->type].pull)
-                {
+                if (props[(int)it->type].pull) {
                     dst.objects.push_back(*it);
                     it = back.objects.erase(it);
-                }
-                else ++it;
+                } else ++it;
         }
     }
 
-    // ========================================================================
-    // 4) Effets post-mouvement (séparés par couche FLOATING)
-    //    Ici seulement, FLOAT sépare les interactions (canon Baba Is You)
-    // ========================================================================
-    for (auto& cell : grid.cells) {
+    // ------------------------------------------------------------------------
+    // 4) Interactions post-mouvement (par couche FLOAT)
+    // ------------------------------------------------------------------------
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
 
-        // On traite d’abord NON-FLOATING (layer 0), puis FLOATING (layer 1)
-        for (int layer = 0; layer < 2; ++layer) {
+            int idx = cell_index(x, y);
+            Cell& cell = grid.cell(x, y);
 
-            bool layerIsFloat = (layer == 1);
+            for (int layer = 0; layer < 2; ++layer) {
 
-            bool hasYou  = false;
-            bool hasWin  = false;
-            bool hasKill = false;
-            bool hasSink = false;
-            bool hasHot  = false;
-            bool hasMelt = false;
-            bool hasOpen = false;
-            bool hasShut = false;
+                bool layerIsFloat = (layer == 1);
 
-            // Scanner uniquement la couche courante
-            for (auto& obj : cell.objects) {
-                const Properties& pr = props[(int)obj.type];
-                if (pr.floating != layerIsFloat)
-                    continue;
+                bool hasYou  = false;
+                bool hasWin  = false;
+                bool hasKill = false;
+                bool hasSink = false;
+                bool hasHot  = false;
+                bool hasMelt = false;
+                bool hasOpen = false;
+                bool hasShut = false;
 
-                if (pr.you)      hasYou  = true;
-                if (pr.win)      hasWin  = true;
-                if (pr.kill)     hasKill = true;
-                if (pr.sink)     hasSink = true;
-                if (pr.hot)      hasHot  = true;
-                if (pr.melt)     hasMelt = true;
-                if (pr.open)     hasOpen = true;
-                if (pr.shut)     hasShut = true;
-            }
-
-            // WIN : YOU + WIN sur la même couche
-            if (hasYou && hasWin)
-                result.hasWon = true;
-
-            // KILL / SINK : YOU + KILL/SINK sur la même couche → mort
-            if (hasYou && (hasKill || hasSink))
-                result.hasDied = true;
-
-            // HOT + MELT : on supprime les MELT de cette couche
-            if (hasHot && hasMelt) {
-                cell.objects.erase(
-                    std::remove_if(cell.objects.begin(), cell.objects.end(),
-                                   [&](const Object& o){
-                                       const Properties& pr = props[(int)o.type];
-                                       return pr.melt && pr.floating == layerIsFloat;
-                                   }),
-                    cell.objects.end()
-                );
-            }
-
-            // OPEN + SHUT : on supprime les deux de cette couche
-            if (hasOpen && hasShut) {
-                cell.objects.erase(
-                    std::remove_if(cell.objects.begin(), cell.objects.end(),
-                                   [&](const Object& o){
-                                       const Properties& pr = props[(int)o.type];
-                                       return (pr.open || pr.shut) &&
-                                              pr.floating == layerIsFloat;
-                                   }),
-                    cell.objects.end()
-                );
-            }
-
-            // SINK : destruction mutuelle sur cette couche
-            if (hasSink) {
                 int countLayer = 0;
+
                 for (auto& obj : cell.objects) {
                     const Properties& pr = props[(int)obj.type];
-                    if (pr.floating == layerIsFloat)
-                        ++countLayer;
+                    if (pr.floating != layerIsFloat)
+                        continue;
+
+                    ++countLayer;
+
+                    if (pr.you)  hasYou  = true;
+                    if (pr.win)  hasWin  = true;
+                    if (pr.kill) hasKill = true;
+                    if (pr.sink) hasSink = true;
+                    if (pr.hot)  hasHot  = true;
+                    if (pr.melt) hasMelt = true;
+                    if (pr.open) hasOpen = true;
+                    if (pr.shut) hasShut = true;
                 }
 
-                if (countLayer > 1) {
+                // WIN
+                if (hasYou && hasWin)
+                    result.hasWon = true;
+
+                // YOU + KILL : détruire uniquement les YOU
+                if (hasYou && hasKill) {
+                    cell.objects.erase(
+                        std::remove_if(cell.objects.begin(), cell.objects.end(),
+                                       [&](const Object& o){
+                                           const Properties& pr = props[(int)o.type];
+                                           return pr.you && pr.floating == layerIsFloat;
+                                       }),
+                        cell.objects.end()
+                    );
+                }
+
+                // SINK : destruction mutuelle (objet entrant + SINK)
+                if (hasSink && countLayer > 1) {
                     cell.objects.erase(
                         std::remove_if(cell.objects.begin(), cell.objects.end(),
                                        [&](const Object& o){
@@ -461,11 +477,49 @@ MoveResult step(Grid& grid,
                         cell.objects.end()
                     );
                 }
+
+                // HOT + MELT
+                if (hasHot && hasMelt) {
+                    cell.objects.erase(
+                        std::remove_if(cell.objects.begin(), cell.objects.end(),
+                                       [&](const Object& o){
+                                           const Properties& pr = props[(int)o.type];
+                                           return pr.melt && pr.floating == layerIsFloat;
+                                       }),
+                        cell.objects.end()
+                    );
+                }
+
+                // OPEN + SHUT
+                if (hasOpen && hasShut) {
+                    cell.objects.erase(
+                        std::remove_if(cell.objects.begin(), cell.objects.end(),
+                                       [&](const Object& o){
+                                           const Properties& pr = props[(int)o.type];
+                                           return (pr.open || pr.shut) &&
+                                                  pr.floating == layerIsFloat;
+                                       }),
+                        cell.objects.end()
+                    );
+                }
             }
         }
-    }
+
+    // ------------------------------------------------------------------------
+    // 5) Vérifier s'il reste au moins un YOU (multi-YOU canonique)
+    // ------------------------------------------------------------------------
+    bool anyYouLeft = false;
+
+    for (auto& c : grid.cells)
+        for (auto& o : c.objects)
+            if (props[(int)o.type].you)
+                anyYouLeft = true;
+
+    if (!anyYouLeft)
+        result.hasDied = true;
 
     return result;
 }
+
 
 } // namespace baba

@@ -164,10 +164,10 @@ static void update_camera(const Grid& g, const PropertyTable& props,
     float camY = g_camera.y;
 
     // Déplacement fluide (tiles / seconde)
-    const float camSpeed = 5.0f; // ajustable
-    float dt = 1.0f / 60.0f;     // si tu as un vrai delta, remplace ici
+    const float camSpeed = 5.0f;
+    const float dt = 1.0f / 60.0f;
 
-    // Déplacement progressif
+    // IMPORTANT : pas d’inversion verticale
     camX += joyX * camSpeed * dt;
     camY += joyY * camSpeed * dt;
 
@@ -175,26 +175,32 @@ static void update_camera(const Grid& g, const PropertyTable& props,
     float levelW = g.playMaxX - g.playMinX + 1;
     float levelH = g.playMaxY - g.playMinY + 1;
 
-    // Horizontal
-    if (levelW <= vw) {
-        camX = g.playMinX - (vw - levelW) * 0.5f;
-    } else {
-        camX = std::clamp(camX,
-                          (float)g.playMinX,
-                          (float)(g.playMaxX - vw + 1));
-    }
+	// Clamp horizontal
+	if (levelW <= vw) {
+		camX = g.playMinX - (vw - levelW) * 0.5f;
+	} else {
+		camX = std::clamp(camX,
+						  (float)g.playMinX,
+						  (float)(g.playMaxX - vw + 1));
+	}
 
-    // Vertical
-    if (levelH <= vh) {
-        camY = g.playMinY - (vh - levelH) * 0.5f;
-    } else {
-        camY = std::clamp(camY,
-                          (float)g.playMinY,
-                          (float)(g.playMaxY - vh + 1));
-    }
+	// Clamp vertical
+	if (levelH <= vh) {
+		camY = g.playMinY - (vh - levelH) * 0.5f;
+	} else {
+		camY = std::clamp(camY,
+						  (float)g.playMinY,
+						  (float)(g.playMaxY - vh + 1));
+}
 
-    g_camera.x = camX;
-    g_camera.y = camY;
+// --- Correction du décalage : alignement sur des tiles entiers ---
+camX = floorf(camX + 0.5f);
+camY = floorf(camY + 0.5f);
+
+// Application
+g_camera.x = camX;
+g_camera.y = camY;
+
 }
 
 
@@ -352,9 +358,9 @@ void game_show_title()
 // ============================================================================
 void game_update() {
 
-    // =========================================================================
-    //  Modes spéciaux (OPTIONS / MENU)
-    // =========================================================================
+    // ---------------------------------------------------------------------
+    //  Modes spéciaux : Menu / Options
+    // ---------------------------------------------------------------------
     if (g_mode == GameMode::Options) {
         options_update();
         return;
@@ -365,15 +371,15 @@ void game_update() {
         return;
     }
 
-    // =========================================================================
-    //  Réinitialisation état de frame
-    // =========================================================================
+    // ---------------------------------------------------------------------
+    //  Réinitialisation des flags (juste avant un éventuel déplacement)
+    // ---------------------------------------------------------------------
     g_state.hasWon  = false;
     g_state.hasDied = false;
 
-    // =========================================================================
-    //  Zoom (L1 / R1)
-    // =========================================================================
+    // ---------------------------------------------------------------------
+    //  Zoom
+    // ---------------------------------------------------------------------
     if (g_core.buttons.pressed(gb_buttons::KEY_L1)) {
         if (g_zoomIndex > 0) {
             g_zoomIndex--;
@@ -388,9 +394,9 @@ void game_update() {
         }
     }
 
-    // =========================================================================
+    // ---------------------------------------------------------------------
     //  Bouton D : recentrer ou changer de YOU
-    // =========================================================================
+    // ---------------------------------------------------------------------
     if (g_core.buttons.pressed(gb_buttons::KEY_D)) {
 
         Point target = compute_camera_target(g_state.grid, g_state.props);
@@ -401,7 +407,6 @@ void game_update() {
         float idealX = target.x - vw * 0.5f;
         float idealY = target.y - vh * 0.5f;
 
-        // Si la caméra n'est pas centrée → on centre
         if (fabsf(g_camera.x - idealX) > 0.1f ||
             fabsf(g_camera.y - idealY) > 0.1f)
         {
@@ -409,7 +414,6 @@ void game_update() {
             g_camera.y = idealY;
         }
         else {
-            // Sinon → on passe au YOU suivant
             auto yous = find_all_you(g_state.grid, g_state.props);
             if (!yous.empty()) {
                 g_selectedYou = (g_selectedYou + 1) % yous.size();
@@ -417,9 +421,9 @@ void game_update() {
         }
     }
 
-    // =========================================================================
+    // ---------------------------------------------------------------------
     //  UNDO (C)
-    // =========================================================================
+    // ---------------------------------------------------------------------
     if (g_core.buttons.pressed(gb_buttons::KEY_C) && !g_undoStack.empty()) {
 
         const GameSnapshot& snap = g_undoStack.back();
@@ -434,15 +438,15 @@ void game_update() {
         return;
     }
 
-    // =========================================================================
-    //  Pipeline règles + transformations
-    // =========================================================================
+    // ---------------------------------------------------------------------
+    //  Pipeline règles AVANT déplacement
+    // ---------------------------------------------------------------------
     rules_parse(g_state.grid, g_state.props, g_state.transforms);
     apply_transformations(g_state.grid, g_state.transforms);
 
-    // =========================================================================
-    //  Déplacement du joueur (flèches)
-    // =========================================================================
+    // ---------------------------------------------------------------------
+    //  Déplacement du joueur
+    // ---------------------------------------------------------------------
     int dx = 0, dy = 0;
 
     if (g_core.buttons.pressed(gb_buttons::KEY_LEFT))  dx = -1;
@@ -452,7 +456,7 @@ void game_update() {
 
     if (dx != 0 || dy != 0) {
 
-        // --- Sauvegarde UNDO ---
+        // --- Sauvegarde pour UNDO ---
         if (g_undoStack.size() >= MAX_UNDO)
             g_undoStack.erase(g_undoStack.begin());
 
@@ -462,31 +466,34 @@ void game_update() {
             g_state.transforms
         });
 
-        // --- Application du mouvement ---
+        // --- Déplacement ---
         MoveResult r = step(g_state.grid, g_state.props, g_state.transforms, dx, dy);
 
         g_state.hasWon  = r.hasWon;
         g_state.hasDied = r.hasDied;
 
+        // --- Victoire ---
         if (g_state.hasWon) {
-            game_win_continue();
+            g_mode = GameMode::Win;
             return;
         }
 
+        // --- Mort (tous les YOU détruits) ---
         if (g_state.hasDied) {
-            game_restart_after_death();
+            g_mode = GameMode::Dead;
             return;
         }
 
+        // --- Pipeline règles APRÈS déplacement ---
         rules_parse(g_state.grid, g_state.props, g_state.transforms);
         apply_transformations(g_state.grid, g_state.transforms);
     }
 
-    // =========================================================================
-    //  Joystick → déplacement caméra (normalisé)
-    // =========================================================================
-    int rawX = g_core.joystick.get_x();   // -128 → +127
-    int rawY = g_core.joystick.get_y();   // -128 → +127
+    // ---------------------------------------------------------------------
+    //  Joystick → déplacement caméra
+    // ---------------------------------------------------------------------
+    int rawX = g_core.joystick.get_x();
+    int rawY = g_core.joystick.get_y();
 
     const int dead = 25;
 
@@ -498,9 +505,6 @@ void game_update() {
     if (rawY >  dead) joyY = +1;
     if (rawY < -dead) joyY = -1;
 
-    // =========================================================================
-    //  Mise à jour caméra
-    // =========================================================================
     update_camera(g_state.grid, g_state.props, joyX, joyY);
 }
 
